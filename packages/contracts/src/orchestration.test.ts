@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ClientOrchestrationCommand,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -47,6 +48,7 @@ function getOptionValue(
   return options?.find((option) => option.id === id)?.value;
 }
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
@@ -83,6 +85,25 @@ it.effect("parses full thread diff input with whitespace ignoring enabled", () =
       ignoreWhitespace: true,
     });
     assert.strictEqual(parsed.ignoreWhitespace, true);
+  }),
+);
+
+it.effect("keeps generic conversation rollback internal-only", () =>
+  Effect.gen(function* () {
+    const rollbackCommand = {
+      type: "thread.conversation.rollback",
+      commandId: "cmd-rollback",
+      threadId: "thread-1",
+      messageId: "message-1",
+      numTurns: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+
+    const clientResult = yield* Effect.exit(decodeClientOrchestrationCommand(rollbackCommand));
+    assert.strictEqual(clientResult._tag, "Failure");
+
+    const parsedInternal = yield* decodeOrchestrationCommand(rollbackCommand);
+    assert.strictEqual(parsedInternal.type, "thread.conversation.rollback");
   }),
 );
 

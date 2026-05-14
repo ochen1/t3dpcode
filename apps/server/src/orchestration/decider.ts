@@ -20,6 +20,27 @@ import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
+function deriveConversationRollbackTarget(
+  messages: OrchestrationReadModel["threads"][number]["messages"],
+  messageId: string,
+): {
+  readonly role: OrchestrationReadModel["threads"][number]["messages"][number]["role"];
+  readonly removedTurnIds: ReadonlySet<string>;
+} | null {
+  const targetIndex = messages.findIndex((message) => message.id === messageId);
+  if (targetIndex < 0) {
+    return null;
+  }
+
+  const removedMessages = messages.slice(targetIndex);
+  return {
+    role: messages[targetIndex]!.role,
+    removedTurnIds: new Set(
+      removedMessages.flatMap((message) => (message.turnId === null ? [] : [message.turnId])),
+    ),
+  };
+}
+
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
     readonly aggregateKind: OrchestrationEvent["aggregateKind"];
@@ -536,6 +557,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.conversation.rollback": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const rollbackTarget = deriveConversationRollbackTarget(thread.messages, command.messageId);
+      if (!rollbackTarget || rollbackTarget.role !== "user") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Conversation rollback must target an existing user message.",
+        });
+      }
+      if (command.numTurns <= 0 || rollbackTarget.removedTurnIds.size !== command.numTurns) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Conversation rollback requested ${command.numTurns} turn(s), but target message '${command.messageId}' would remove ${rollbackTarget.removedTurnIds.size} turn(s).`,
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.conversation-rollback-requested",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          numTurns: command.numTurns,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.session.stop": {
       yield* requireThread({
         readModel,
@@ -698,6 +755,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+        },
+      };
+    }
+
+    case "thread.conversation.rollback.complete": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.conversation-rolled-back",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          numTurns: command.numTurns,
+          ...(command.removedTurnIds !== undefined
+            ? { removedTurnIds: command.removedTurnIds }
+            : {}),
+          ...(command.skipAttachmentPrune !== undefined
+            ? { skipAttachmentPrune: command.skipAttachmentPrune }
+            : {}),
         },
       };
     }

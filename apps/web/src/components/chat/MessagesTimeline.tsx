@@ -375,7 +375,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 {displayedUserMessage.copyText && (
                   <MessageCopyButton text={displayedUserMessage.copyText} />
                 )}
-                {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+                <RevertUserMessageButton
+                  canRevertAgentWork={canRevertAgentWork}
+                  messageId={row.message.id}
+                />
               </div>
               <p className="text-right text-xs text-muted-foreground/50">
                 {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
@@ -388,18 +391,30 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
-function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
+function RevertUserMessageButton({
+  canRevertAgentWork,
+  messageId,
+}: {
+  canRevertAgentWork: boolean;
+  messageId: MessageId;
+}) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
+  const disabled = !canRevertAgentWork || activity.isRevertingCheckpoint || activity.isWorking;
 
   return (
     <Button
       type="button"
       size="xs"
       variant="outline"
-      disabled={activity.isRevertingCheckpoint || activity.isWorking}
+      aria-label="Revert to this message"
+      disabled={disabled}
       onClick={() => ctx.onRevertUserMessage(messageId)}
-      title="Revert to this message"
+      title={
+        canRevertAgentWork
+          ? "Revert to this message"
+          : "Undo becomes available after a reply is checkpointed"
+      }
     >
       <Undo2Icon className="size-3" />
     </Button>
