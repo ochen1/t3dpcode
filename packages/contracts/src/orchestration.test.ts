@@ -87,7 +87,7 @@ it.effect("parses full thread diff input with whitespace ignoring enabled", () =
   }),
 );
 
-it.effect("keeps generic conversation rollback internal-only", () =>
+it.effect("allows clients to request conversation rollback", () =>
   Effect.gen(function* () {
     const rollbackCommand = {
       type: "thread.conversation.rollback",
@@ -98,11 +98,11 @@ it.effect("keeps generic conversation rollback internal-only", () =>
       createdAt: "2026-01-01T00:00:00.000Z",
     };
 
-    const clientResult = yield* Effect.exit(decodeClientOrchestrationCommand(rollbackCommand));
-    assert.strictEqual(clientResult._tag, "Failure");
+    const parsedClient = yield* decodeClientOrchestrationCommand(rollbackCommand);
+    assert.strictEqual(parsedClient.type, "thread.conversation.rollback");
 
-    const parsedInternal = yield* decodeOrchestrationCommand(rollbackCommand);
-    assert.strictEqual(parsedInternal.type, "thread.conversation.rollback");
+    const parsedCommand = yield* decodeOrchestrationCommand(rollbackCommand);
+    assert.strictEqual(parsedCommand.type, "thread.conversation.rollback");
   }),
 );
 

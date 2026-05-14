@@ -567,7 +567,7 @@ function RevertUserMessageButton({
       <TooltipPopup side="top">
         {canRevertAgentWork
           ? "Revert to this message"
-          : "Undo becomes available after a reply is checkpointed"}
+          : "Undo becomes available after the provider replies"}
       </TooltipPopup>
     </Tooltip>
   );

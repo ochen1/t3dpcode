@@ -349,6 +349,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onQueue: () => void;
+  onSteer: () => void;
   onImplementPlanInNewThread: () => void;
 }) {
   return (
@@ -376,6 +378,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
+        onQueue={props.onQueue}
+        onSteer={props.onSteer}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
       />
     </>
@@ -511,6 +515,8 @@ export interface ChatComposerProps {
   // Callbacks
   onSend: (e?: { preventDefault: () => void; metaKey?: boolean; ctrlKey?: boolean }) => void;
   onInterrupt: () => void;
+  onQueue?: () => void;
+  onSteer?: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -597,6 +603,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     scheduleStickToBottom,
     onSend,
     onInterrupt,
+    onQueue,
+    onSteer,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -977,6 +985,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           command: "default",
           label: "/default",
           description: "Switch this thread back to normal build mode",
+        },
+        {
+          id: "slash:fork",
+          type: "slash-command",
+          command: "fork",
+          label: "/fork",
+          description: "Fork this thread",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
@@ -1606,6 +1621,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
+        if (item.command === "fork") {
+          const replacement = "/fork ";
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -1720,6 +1753,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [blurMobileComposerAfterSend, onSend, shouldBlurMobileComposerOnSubmit],
   );
+  const queueComposer = useCallback(() => {
+    if (onQueue) {
+      onQueue();
+      return;
+    }
+    submitComposer({ preventDefault: () => undefined });
+  }, [onQueue, submitComposer]);
+  const steerComposer = useCallback(() => {
+    if (onSteer) {
+      onSteer();
+      return;
+    }
+    submitComposer({ preventDefault: () => undefined, metaKey: true });
+  }, [onSteer, submitComposer]);
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
       window.cancelAnimationFrame(composerBlurFrameRef.current);
@@ -2203,6 +2250,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       preserveComposerFocusOnPointerDown
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                       onInterrupt={handleInterruptPrimaryAction}
+                      onQueue={queueComposer}
+                      onSteer={steerComposer}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                     />
                   ) : null}
@@ -2464,6 +2513,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     preserveComposerFocusOnPointerDown
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
+                    onQueue={queueComposer}
+                    onSteer={steerComposer}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                   />
                 </div>
@@ -2575,6 +2626,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
+                  onQueue={queueComposer}
+                  onSteer={steerComposer}
                   onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                 />
               </div>
