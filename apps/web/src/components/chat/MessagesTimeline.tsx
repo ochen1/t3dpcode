@@ -523,7 +523,10 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
+            <RevertUserMessageButton
+              canRevertAgentWork={canRevertAgentWork}
+              messageId={row.message.id}
+            />
             {displayedUserMessage.copyText && (
               <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
             )}
@@ -534,9 +537,16 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
-function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
+function RevertUserMessageButton({
+  canRevertAgentWork,
+  messageId,
+}: {
+  canRevertAgentWork: boolean;
+  messageId: MessageId;
+}) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
+  const disabled = !canRevertAgentWork || activity.isRevertingCheckpoint || activity.isWorking;
 
   return (
     <Tooltip>
@@ -546,7 +556,7 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             type="button"
             size="xs"
             variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
+            disabled={disabled}
             onClick={() => ctx.onRevertUserMessage(messageId)}
             aria-label="Revert to this message"
           />
@@ -554,7 +564,11 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
       >
         <Undo2Icon className="size-3" />
       </TooltipTrigger>
-      <TooltipPopup side="top">Revert to this message</TooltipPopup>
+      <TooltipPopup side="top">
+        {canRevertAgentWork
+          ? "Revert to this message"
+          : "Undo becomes available after a reply is checkpointed"}
+      </TooltipPopup>
     </Tooltip>
   );
 }

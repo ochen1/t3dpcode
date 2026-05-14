@@ -327,6 +327,56 @@ function retainProjectionProposedPlansAfterRevert(
   );
 }
 
+function rollbackProjectionMessagesFromMessage(
+  messages: ReadonlyArray<ProjectionThreadMessage>,
+  messageId: string,
+): {
+  readonly keptRows: ReadonlyArray<ProjectionThreadMessage>;
+  readonly removedTurnIds: ReadonlySet<string>;
+  readonly changed: boolean;
+} {
+  const targetIndex = messages.findIndex((message) => message.messageId === messageId);
+  if (targetIndex < 0) {
+    return { keptRows: messages, removedTurnIds: new Set(), changed: false };
+  }
+  const removedRows = messages.slice(targetIndex);
+  return {
+    keptRows: messages.slice(0, targetIndex),
+    removedTurnIds: new Set(
+      removedRows.flatMap((message) => (message.turnId === null ? [] : [message.turnId])),
+    ),
+    changed: true,
+  };
+}
+
+function retainProjectionTurnsAfterConversationRollback(
+  turns: ReadonlyArray<ProjectionTurn>,
+  removedTurnIds: ReadonlySet<string>,
+): ReadonlyArray<ProjectionTurn> {
+  if (removedTurnIds.size === 0) {
+    return turns;
+  }
+  return turns.filter((turn) => turn.turnId === null || !removedTurnIds.has(turn.turnId));
+}
+
+function retainProjectionActivitiesAfterConversationRollback(
+  activities: ReadonlyArray<ProjectionThreadActivity>,
+  removedTurnIds: ReadonlySet<string>,
+): ReadonlyArray<ProjectionThreadActivity> {
+  return activities.filter(
+    (activity) => activity.turnId === null || !removedTurnIds.has(activity.turnId),
+  );
+}
+
+function retainProjectionProposedPlansAfterConversationRollback(
+  proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>,
+  removedTurnIds: ReadonlySet<string>,
+): ReadonlyArray<ProjectionThreadProposedPlan> {
+  return proposedPlans.filter(
+    (proposedPlan) => proposedPlan.turnId === null || !removedTurnIds.has(proposedPlan.turnId),
+  );
+}
+
 function collectThreadAttachmentRelativePaths(
   threadId: string,
   messages: ReadonlyArray<ProjectionThreadMessage>,
@@ -802,6 +852,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.conversation-rolled-back": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            latestTurnId: null,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
         default:
           return;
       }
@@ -881,6 +947,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.conversation-rolled-back": {
+          if (event.payload.numTurns === 0) {
+            return;
+          }
+          const existingRows = yield* projectionThreadMessageRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const rollback = rollbackProjectionMessagesFromMessage(
+            existingRows,
+            event.payload.messageId,
+          );
+          if (!rollback.changed) {
+            return;
+          }
+
+          yield* projectionThreadMessageRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* Effect.forEach(rollback.keptRows, projectionThreadMessageRepository.upsert, {
+            concurrency: 1,
+          }).pipe(Effect.asVoid);
+          if (event.payload.skipAttachmentPrune !== true) {
+            attachmentSideEffects.prunedThreadRelativePaths.set(
+              event.payload.threadId,
+              collectThreadAttachmentRelativePaths(event.payload.threadId, rollback.keptRows),
+            );
+          }
+          return;
+        }
+
         default:
           return;
       }
@@ -932,6 +1028,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.conversation-rolled-back": {
+          const existingRows = yield* projectionThreadProposedPlanRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (existingRows.length === 0) {
+            return;
+          }
+          const removedTurnIds = new Set(event.payload.removedTurnIds ?? []);
+          const keptRows = retainProjectionProposedPlansAfterConversationRollback(
+            existingRows,
+            removedTurnIds,
+          );
+          if (keptRows.length === existingRows.length) {
+            return;
+          }
+          yield* projectionThreadProposedPlanRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* Effect.forEach(keptRows, projectionThreadProposedPlanRepository.upsert, {
+            concurrency: 1,
+          }).pipe(Effect.asVoid);
+          return;
+        }
+
         default:
           return;
       }
@@ -971,6 +1091,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             existingRows,
             existingTurns,
             event.payload.turnCount,
+          );
+          if (keptRows.length === existingRows.length) {
+            return;
+          }
+          yield* projectionThreadActivityRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* Effect.forEach(keptRows, projectionThreadActivityRepository.upsert, {
+            concurrency: 1,
+          }).pipe(Effect.asVoid);
+          return;
+        }
+
+        case "thread.conversation-rolled-back": {
+          const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (existingRows.length === 0) {
+            return;
+          }
+          const removedTurnIds = new Set(event.payload.removedTurnIds ?? []);
+          const keptRows = retainProjectionActivitiesAfterConversationRollback(
+            existingRows,
+            removedTurnIds,
           );
           if (keptRows.length === existingRows.length) {
             return;
@@ -1311,6 +1455,35 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               turn.checkpointTurnCount !== null &&
               turn.checkpointTurnCount <= event.payload.turnCount,
           );
+          yield* projectionTurnRepository.deleteByThreadId({
+            threadId: event.payload.threadId,
+          });
+          yield* Effect.forEach(
+            keptTurns,
+            (turn) =>
+              turn.turnId === null
+                ? Effect.void
+                : projectionTurnRepository.upsertByTurnId({
+                    ...turn,
+                    turnId: turn.turnId,
+                  }),
+            { concurrency: 1 },
+          ).pipe(Effect.asVoid);
+          return;
+        }
+
+        case "thread.conversation-rolled-back": {
+          const existingTurns = yield* projectionTurnRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const removedTurnIds = new Set(event.payload.removedTurnIds ?? []);
+          const keptTurns = retainProjectionTurnsAfterConversationRollback(
+            existingTurns,
+            removedTurnIds,
+          );
+          if (keptTurns.length === existingTurns.length) {
+            return;
+          }
           yield* projectionTurnRepository.deleteByThreadId({
             threadId: event.payload.threadId,
           });

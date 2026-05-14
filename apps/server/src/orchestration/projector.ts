@@ -23,6 +23,7 @@ import {
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
+  ThreadConversationRolledBackPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
@@ -159,6 +160,27 @@ function retainThreadProposedPlansAfterRevert(
   return proposedPlans.filter(
     (proposedPlan) => proposedPlan.turnId === null || retainedTurnIds.has(proposedPlan.turnId),
   );
+}
+
+function rollbackThreadMessagesFromMessage(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  messageId: string,
+): {
+  readonly messages: ReadonlyArray<OrchestrationMessage>;
+  readonly removedTurnIds: ReadonlySet<string>;
+} {
+  const targetIndex = messages.findIndex((message) => message.id === messageId);
+  if (targetIndex < 0) {
+    return { messages, removedTurnIds: new Set() };
+  }
+
+  const removedMessages = messages.slice(targetIndex);
+  return {
+    messages: messages.slice(0, targetIndex),
+    removedTurnIds: new Set(
+      removedMessages.flatMap((message) => (message.turnId === null ? [] : [message.turnId])),
+    ),
+  };
 }
 
 function compareThreadActivities(
@@ -656,6 +678,67 @@ export function projectEvent(
               proposedPlans,
               activities,
               latestTurn,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.conversation-rolled-back":
+      return decodeForEvent(
+        ThreadConversationRolledBackPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          if (payload.numTurns === 0) {
+            return nextBase;
+          }
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+
+          const rollback = rollbackThreadMessagesFromMessage(thread.messages, payload.messageId);
+          if (rollback.messages === thread.messages) {
+            return nextBase;
+          }
+
+          const removedTurnIds = new Set([
+            ...rollback.removedTurnIds,
+            ...(payload.removedTurnIds ?? []),
+          ]);
+          const checkpoints = thread.checkpoints
+            .filter((checkpoint) => !removedTurnIds.has(checkpoint.turnId))
+            .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
+            .slice(-MAX_THREAD_CHECKPOINTS);
+          const proposedPlans = thread.proposedPlans
+            .filter((plan) => plan.turnId === null || !removedTurnIds.has(plan.turnId))
+            .slice(-200);
+          const activities = thread.activities.filter(
+            (activity) => activity.turnId === null || !removedTurnIds.has(activity.turnId),
+          );
+          const latestCheckpoint = checkpoints.at(-1) ?? null;
+
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              checkpoints,
+              messages: rollback.messages.slice(-MAX_THREAD_MESSAGES),
+              proposedPlans,
+              activities,
+              latestTurn:
+                latestCheckpoint === null
+                  ? null
+                  : {
+                      turnId: latestCheckpoint.turnId,
+                      state: checkpointStatusToLatestTurnState(latestCheckpoint.status),
+                      requestedAt: latestCheckpoint.completedAt,
+                      startedAt: latestCheckpoint.completedAt,
+                      completedAt: latestCheckpoint.completedAt,
+                      assistantMessageId: latestCheckpoint.assistantMessageId,
+                    },
               updatedAt: event.occurredAt,
             }),
           };

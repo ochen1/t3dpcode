@@ -53,6 +53,7 @@ type ProviderIntentEvent = Extract<
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
+      | "thread.conversation-rollback-requested"
       | "thread.session-stop-requested";
   }
 >;
@@ -154,6 +155,25 @@ function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServic
     message.includes("unknown pending user input request") ||
     message.includes("unknown pending codex user input request")
   );
+}
+
+function removedTurnIdsFromMessage(
+  messages: ReadonlyArray<{ readonly id: string; readonly turnId?: TurnId | null }>,
+  messageId: string,
+): TurnId[] {
+  const targetIndex = messages.findIndex((message) => message.id === messageId);
+  if (targetIndex < 0) {
+    return [];
+  }
+  return [
+    ...new Set(
+      messages
+        .slice(targetIndex)
+        .flatMap((message) =>
+          message.turnId === undefined || message.turnId === null ? [] : [message.turnId],
+        ),
+    ),
+  ];
 }
 
 function stalePendingRequestDetail(
@@ -971,6 +991,31 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const processConversationRollbackRequested = Effect.fn("processConversationRollbackRequested")(
+    function* (
+      event: Extract<ProviderIntentEvent, { type: "thread.conversation-rollback-requested" }>,
+    ) {
+      const thread = yield* resolveThread(event.payload.threadId);
+      if (event.payload.numTurns > 0) {
+        yield* providerService.rollbackConversation({
+          threadId: event.payload.threadId,
+          numTurns: event.payload.numTurns,
+        });
+      }
+      yield* orchestrationEngine.dispatch({
+        type: "thread.conversation.rollback.complete",
+        commandId: serverCommandId("conversation-rollback-complete"),
+        threadId: event.payload.threadId,
+        messageId: event.payload.messageId,
+        numTurns: event.payload.numTurns,
+        removedTurnIds: thread
+          ? removedTurnIdsFromMessage(thread.messages, event.payload.messageId)
+          : [],
+        createdAt: event.payload.createdAt,
+      });
+    },
+  );
+
   const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
@@ -1039,6 +1084,9 @@ const make = Effect.gen(function* () {
       case "thread.user-input-response-requested":
         yield* processUserInputResponseRequested(event);
         return;
+      case "thread.conversation-rollback-requested":
+        yield* processConversationRollbackRequested(event);
+        return;
       case "thread.session-stop-requested":
         yield* processSessionStopRequested(event);
         return;
@@ -1068,6 +1116,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||
+        event.type === "thread.conversation-rollback-requested" ||
         event.type === "thread.session-stop-requested"
       ) {
         return yield* worker.enqueue(event);
