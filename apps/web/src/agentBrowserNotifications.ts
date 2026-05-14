@@ -330,15 +330,16 @@ async function playAgentBrowserNotificationSound(): Promise<void> {
 
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(784, startAt);
-    oscillator.frequency.exponentialRampToValueAtTime(988, startAt + 0.08);
+    oscillator.frequency.exponentialRampToValueAtTime(988, startAt + 0.12);
     gain.gain.setValueAtTime(0.0001, startAt);
-    gain.gain.exponentialRampToValueAtTime(0.08, startAt + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.22);
+    gain.gain.exponentialRampToValueAtTime(0.35, startAt + 0.02);
+    gain.gain.setValueAtTime(0.35, startAt + 0.16);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.42);
 
     oscillator.connect(gain);
     gain.connect(audioContext.destination);
     oscillator.start(startAt);
-    oscillator.stop(startAt + 0.24);
+    oscillator.stop(startAt + 0.44);
     oscillator.addEventListener("ended", () => {
       void audioContext.close();
     });
