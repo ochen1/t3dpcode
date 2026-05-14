@@ -133,6 +133,9 @@ import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
+  type QueuedComposerChatTurn,
+  type QueuedComposerPlanFollowUp,
+  type QueuedComposerTurn,
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
@@ -200,6 +203,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
+const EMPTY_QUEUED_COMPOSER_TURNS: QueuedComposerTurn[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
@@ -333,6 +337,27 @@ function formatOutgoingPrompt(params: {
   const promptEffort = resolvePromptInjectedEffort(caps, params.effort);
   return applyClaudePromptEffortPrefix(params.text, promptEffort);
 }
+
+function buildQueuedComposerPreviewText(input: {
+  readonly trimmedPrompt: string;
+  readonly images: readonly ComposerImageAttachment[];
+  readonly terminalContexts: readonly TerminalContextDraft[];
+}): string {
+  if (input.trimmedPrompt.length > 0) {
+    return truncate(input.trimmedPrompt, 80);
+  }
+  if (input.images.length > 0) {
+    return input.images.length === 1
+      ? `Image: ${input.images[0]?.name ?? "attachment"}`
+      : `${input.images.length} images`;
+  }
+  if (input.terminalContexts.length > 0) {
+    const firstContext = input.terminalContexts[0];
+    return firstContext ? formatTerminalContextLabel(firstContext) : "Terminal context";
+  }
+  return "Queued follow-up";
+}
+
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
 
@@ -664,6 +689,11 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
   );
+  const enqueueQueuedComposerTurn = useComposerDraftStore((store) => store.enqueueQueuedTurn);
+  const insertQueuedComposerTurn = useComposerDraftStore((store) => store.insertQueuedTurn);
+  const removeQueuedComposerTurnFromDraft = useComposerDraftStore(
+    (store) => store.removeQueuedTurn,
+  );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
@@ -690,6 +720,13 @@ export default function ChatView(props: ChatViewProps) {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
+  const queuedComposerTurns = useComposerDraftStore(
+    (store) =>
+      store.getComposerDraft(composerDraftTarget)?.queuedTurns ?? EMPTY_QUEUED_COMPOSER_TURNS,
+  );
+  const queuedComposerTurnsRef = useRef(queuedComposerTurns);
+  queuedComposerTurnsRef.current = queuedComposerTurns;
+  const autoDispatchingQueuedTurnRef = useRef(false);
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
     Record<string, string | null>
   >({});
@@ -2253,6 +2290,7 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
+    autoDispatchingQueuedTurnRef.current = false;
   }, [activeThread?.id]);
 
   useEffect(() => {
@@ -2542,13 +2580,67 @@ export default function ChatView(props: ChatViewProps) {
     toggleTerminalVisibility,
   ]);
 
-  const onSend = async (e?: {
-    preventDefault: () => void;
-    metaKey?: boolean;
-    ctrlKey?: boolean;
-  }) => {
+  const removeQueuedComposerTurn = useCallback(
+    (queuedTurnId: string) => {
+      removeQueuedComposerTurnFromDraft(composerDraftTarget, queuedTurnId);
+    },
+    [composerDraftTarget, removeQueuedComposerTurnFromDraft],
+  );
+
+  const restoreQueuedTurnToComposer = useCallback(
+    (queuedTurn: QueuedComposerTurn) => {
+      clearComposerDraftContent(composerDraftTarget);
+      const text = queuedTurn.kind === "chat" ? queuedTurn.prompt : queuedTurn.text;
+      const images =
+        queuedTurn.kind === "chat" ? queuedTurn.images.map(cloneComposerImageForRetry) : [];
+      const terminalContexts = queuedTurn.kind === "chat" ? [...queuedTurn.terminalContexts] : [];
+
+      setComposerDraftPrompt(composerDraftTarget, text);
+      if (images.length > 0) {
+        addComposerDraftImages(composerDraftTarget, images);
+      }
+      setComposerDraftTerminalContexts(composerDraftTarget, terminalContexts);
+      promptRef.current = text;
+      composerImagesRef.current = images;
+      composerTerminalContextsRef.current = terminalContexts;
+      composerRef.current?.resetCursorState({
+        cursor: collapseExpandedComposerCursor(text, text.length),
+        prompt: text,
+        detectTrigger: true,
+      });
+      scheduleComposerFocus();
+    },
+    [
+      addComposerDraftImages,
+      clearComposerDraftContent,
+      composerDraftTarget,
+      composerRef,
+      scheduleComposerFocus,
+      setComposerDraftPrompt,
+      setComposerDraftTerminalContexts,
+    ],
+  );
+
+  const onEditQueuedComposerTurn = useCallback(
+    (queuedTurn: QueuedComposerTurn) => {
+      removeQueuedComposerTurn(queuedTurn.id);
+      restoreQueuedTurnToComposer(queuedTurn);
+    },
+    [removeQueuedComposerTurn, restoreQueuedTurnToComposer],
+  );
+
+  const onSend = async (
+    e?: {
+      preventDefault: () => void;
+      metaKey?: boolean;
+      ctrlKey?: boolean;
+    },
+    explicitDispatchMode?: TurnDispatchMode,
+    queuedTurn?: QueuedComposerChatTurn,
+  ): Promise<boolean> => {
     e?.preventDefault();
-    const dispatchMode: TurnDispatchMode = e?.metaKey || e?.ctrlKey ? "steer" : "queue";
+    const dispatchMode: TurnDispatchMode =
+      explicitDispatchMode ?? (e?.metaKey || e?.ctrlKey ? "steer" : "queue");
     const api = readEnvironmentApi(environmentId);
     if (
       !api ||
@@ -2558,13 +2650,26 @@ export default function ChatView(props: ChatViewProps) {
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
     )
-      return;
+      return false;
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
-      return;
+      return true;
     }
-    const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx) return;
+    const queuedChatTurn = queuedTurn ?? null;
+    const sendCtx = queuedChatTurn
+      ? {
+          prompt: queuedChatTurn.prompt,
+          images: queuedChatTurn.images,
+          terminalContexts: queuedChatTurn.terminalContexts,
+          selectedPromptEffort: queuedChatTurn.selectedPromptEffort,
+          selectedModelOptionsForDispatch: null,
+          selectedModelSelection: queuedChatTurn.selectedModelSelection,
+          selectedProvider: queuedChatTurn.selectedProvider,
+          selectedModel: queuedChatTurn.selectedModel,
+          selectedProviderModels: queuedChatTurn.selectedProviderModels,
+        }
+      : composerRef.current?.getSendContext();
+    if (!sendCtx) return false;
     const {
       images: composerImages,
       terminalContexts: composerTerminalContexts,
@@ -2574,7 +2679,7 @@ export default function ChatView(props: ChatViewProps) {
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx;
-    const promptForSend = promptRef.current;
+    const promptForSend = queuedChatTurn ? queuedChatTurn.prompt : promptRef.current;
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -2590,14 +2695,33 @@ export default function ChatView(props: ChatViewProps) {
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
+      if (phase === "running" && dispatchMode === "queue" && queuedChatTurn === null) {
+        enqueueQueuedComposerTurn(composerDraftTarget, {
+          id: randomUUID(),
+          kind: "plan-follow-up",
+          createdAt: new Date().toISOString(),
+          previewText: followUp.text.trim() || "Queued follow-up",
+          text: followUp.text,
+          interactionMode: followUp.interactionMode,
+          selectedPromptEffort: ctxSelectedPromptEffort,
+          selectedModelSelection: ctxSelectedModelSelection,
+          selectedProvider: ctxSelectedProvider,
+          selectedModel: ctxSelectedModel,
+          selectedProviderModels: ctxSelectedProviderModels,
+        });
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+        return true;
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
-      await onSubmitPlanFollowUp({
+      return onSubmitPlanFollowUp({
         text: followUp.text,
         interactionMode: followUp.interactionMode,
+        dispatchMode,
       });
-      return;
     }
     const standaloneSlashCommand =
       composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
@@ -2608,12 +2732,12 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
-      return;
+      return true;
     }
     if (trimmed === "/fork" || trimmed === "/fork local") {
       if (!activeProject || !isServerThread) {
         setThreadError(activeThread.id, "Fork is available for saved project threads.");
-        return;
+        return false;
       }
       const createdAt = new Date().toISOString();
       const forkedThreadId = newThreadId();
@@ -2665,7 +2789,7 @@ export default function ChatView(props: ChatViewProps) {
           threadId: forkedThreadId,
         },
       });
-      return;
+      return true;
     }
     if (!hasSendableContent) {
       if (expiredTerminalContextCount > 0) {
@@ -2681,9 +2805,34 @@ export default function ChatView(props: ChatViewProps) {
           }),
         );
       }
-      return;
+      return false;
     }
-    if (!activeProject) return;
+    if (!activeProject) return false;
+    if (phase === "running" && dispatchMode === "queue" && queuedChatTurn === null) {
+      const queuedImages = composerImages.map(cloneComposerImageForRetry);
+      enqueueQueuedComposerTurn(composerDraftTarget, {
+        id: randomUUID(),
+        kind: "chat",
+        createdAt: new Date().toISOString(),
+        previewText: buildQueuedComposerPreviewText({
+          trimmedPrompt: trimmed,
+          images: queuedImages,
+          terminalContexts: sendableComposerTerminalContexts,
+        }),
+        prompt: promptForSend,
+        images: queuedImages,
+        terminalContexts: sendableComposerTerminalContexts,
+        selectedPromptEffort: ctxSelectedPromptEffort,
+        selectedModelSelection: ctxSelectedModelSelection,
+        selectedProvider: ctxSelectedProvider,
+        selectedModel: ctxSelectedModel,
+        selectedProviderModels: ctxSelectedProviderModels,
+      });
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return true;
+    }
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
@@ -2697,7 +2846,7 @@ export default function ChatView(props: ChatViewProps) {
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
-      return;
+      return false;
     }
 
     sendInFlightRef.current = true;
@@ -2907,6 +3056,7 @@ export default function ChatView(props: ChatViewProps) {
     if (!turnStartSucceeded) {
       resetLocalDispatch();
     }
+    return turnStartSucceeded;
   };
 
   const onInterrupt = async () => {
@@ -3086,10 +3236,14 @@ export default function ChatView(props: ChatViewProps) {
     async ({
       text,
       interactionMode: nextInteractionMode,
+      dispatchMode = "queue",
+      queuedTurn,
     }: {
       text: string;
       interactionMode: "default" | "plan";
-    }) => {
+      dispatchMode?: TurnDispatchMode;
+      queuedTurn?: QueuedComposerPlanFollowUp;
+    }): Promise<boolean> => {
       const api = readEnvironmentApi(environmentId);
       if (
         !api ||
@@ -3099,17 +3253,25 @@ export default function ChatView(props: ChatViewProps) {
         isConnecting ||
         sendInFlightRef.current
       ) {
-        return;
+        return false;
       }
 
       const trimmed = text.trim();
       if (!trimmed) {
-        return;
+        return false;
       }
 
-      const sendCtx = composerRef.current?.getSendContext();
+      const sendCtx = queuedTurn
+        ? {
+            selectedProvider: queuedTurn.selectedProvider,
+            selectedModel: queuedTurn.selectedModel,
+            selectedProviderModels: queuedTurn.selectedProviderModels,
+            selectedPromptEffort: queuedTurn.selectedPromptEffort,
+            selectedModelSelection: queuedTurn.selectedModelSelection,
+          }
+        : composerRef.current?.getSendContext();
       if (!sendCtx) {
-        return;
+        return false;
       }
       const {
         selectedProvider: ctxSelectedProvider,
@@ -3146,6 +3308,7 @@ export default function ChatView(props: ChatViewProps) {
           id: messageIdForSend,
           role: "user",
           text: outgoingMessageText,
+          dispatchMode,
           createdAt: messageCreatedAt,
           streaming: false,
         },
@@ -3179,6 +3342,7 @@ export default function ChatView(props: ChatViewProps) {
           },
           modelSelection: ctxSelectedModelSelection,
           titleSeed: activeThread.title,
+          dispatchMode,
           runtimeMode,
           interactionMode: nextInteractionMode,
           ...(nextInteractionMode === "default" && activeProposedPlan
@@ -3199,6 +3363,7 @@ export default function ChatView(props: ChatViewProps) {
           setPlanSidebarOpen(true);
         }
         sendInFlightRef.current = false;
+        return true;
       } catch (err) {
         setOptimisticUserMessages((existing) =>
           existing.filter((message) => message.id !== messageIdForSend),
@@ -3209,6 +3374,7 @@ export default function ChatView(props: ChatViewProps) {
         );
         sendInFlightRef.current = false;
         resetLocalDispatch();
+        return false;
       }
     },
     [
@@ -3227,6 +3393,89 @@ export default function ChatView(props: ChatViewProps) {
       environmentId,
     ],
   );
+
+  const onSendRef = useRef(onSend);
+  const onSubmitPlanFollowUpRef = useRef(onSubmitPlanFollowUp);
+  onSendRef.current = onSend;
+  onSubmitPlanFollowUpRef.current = onSubmitPlanFollowUp;
+
+  const dispatchQueuedComposerTurn = useCallback(
+    async (queuedTurn: QueuedComposerTurn, dispatchMode: TurnDispatchMode): Promise<boolean> => {
+      if (queuedTurn.kind === "chat") {
+        return onSendRef.current(undefined, dispatchMode, queuedTurn);
+      }
+      return onSubmitPlanFollowUpRef.current({
+        text: queuedTurn.text,
+        interactionMode: queuedTurn.interactionMode,
+        dispatchMode,
+        queuedTurn,
+      });
+    },
+    [],
+  );
+
+  const onSteerQueuedComposerTurn = useCallback(
+    async (queuedTurn: QueuedComposerTurn) => {
+      const previousQueue = queuedComposerTurnsRef.current;
+      const queuedIndex = previousQueue.findIndex((entry) => entry.id === queuedTurn.id);
+      if (queuedIndex < 0) {
+        return;
+      }
+      removeQueuedComposerTurn(queuedTurn.id);
+      const succeeded = await dispatchQueuedComposerTurn(queuedTurn, "steer");
+      if (succeeded) {
+        return;
+      }
+      insertQueuedComposerTurn(composerDraftTarget, queuedTurn, queuedIndex);
+    },
+    [
+      composerDraftTarget,
+      dispatchQueuedComposerTurn,
+      insertQueuedComposerTurn,
+      removeQueuedComposerTurn,
+    ],
+  );
+
+  useEffect(() => {
+    if (autoDispatchingQueuedTurnRef.current) {
+      return;
+    }
+    if (
+      phase === "running" ||
+      phase === "disconnected" ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current ||
+      activePendingApproval !== null ||
+      activePendingProgress !== null ||
+      pendingUserInputs.length > 0 ||
+      queuedComposerTurns.length === 0
+    ) {
+      return;
+    }
+    const nextQueuedTurn = queuedComposerTurns[0];
+    if (!nextQueuedTurn) {
+      return;
+    }
+    autoDispatchingQueuedTurnRef.current = true;
+    void (async () => {
+      const succeeded = await dispatchQueuedComposerTurn(nextQueuedTurn, "queue");
+      if (succeeded) {
+        removeQueuedComposerTurn(nextQueuedTurn.id);
+      }
+      autoDispatchingQueuedTurnRef.current = false;
+    })();
+  }, [
+    activePendingApproval,
+    activePendingProgress,
+    dispatchQueuedComposerTurn,
+    isConnecting,
+    isSendBusy,
+    pendingUserInputs.length,
+    phase,
+    queuedComposerTurns,
+    removeQueuedComposerTurn,
+  ]);
 
   const onImplementPlanInNewThread = useCallback(async () => {
     const api = readEnvironmentApi(environmentId);
@@ -3638,6 +3887,56 @@ export default function ChatView(props: ChatViewProps) {
             <div className="relative isolate">
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
               <div className="relative z-10">
+                {queuedComposerTurns.length > 0 ? (
+                  <div className="mx-auto flex w-11/12 max-w-3xl flex-col">
+                    {queuedComposerTurns.map((queuedTurn, queuedTurnIndex) => (
+                      <div
+                        key={queuedTurn.id}
+                        data-testid="queued-follow-up-row"
+                        className={cn(
+                          "flex items-center gap-2 border border-b-0 border-border bg-background px-2.5 py-2 text-xs shadow-sm",
+                          queuedTurnIndex === 0 ? "rounded-t-lg" : "rounded-none",
+                        )}
+                      >
+                        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                          <span className="text-muted-foreground" aria-hidden>
+                            Q
+                          </span>
+                          <span className="truncate font-medium text-foreground/85">
+                            {queuedTurn.previewText}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="outline"
+                            onClick={() => void onSteerQueuedComposerTurn(queuedTurn)}
+                          >
+                            Steer
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => onEditQueuedComposerTurn(queuedTurn)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="ghost"
+                            aria-label="Delete queued follow-up"
+                            onClick={() => removeQueuedComposerTurn(queuedTurn.id)}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <ChatComposer
                   composerRef={composerRef}
                   composerDraftTarget={composerDraftTarget}
@@ -3689,8 +3988,8 @@ export default function ChatView(props: ChatViewProps) {
                   scheduleStickToBottom={scrollToEnd}
                   onSend={onSend}
                   onInterrupt={onInterrupt}
-                  onQueue={() => onSend({ preventDefault: () => undefined })}
-                  onSteer={() => onSend({ preventDefault: () => undefined, metaKey: true })}
+                  onQueue={() => void onSend({ preventDefault: () => undefined }, "queue")}
+                  onSteer={() => void onSend({ preventDefault: () => undefined }, "steer")}
                   onImplementPlanInNewThread={onImplementPlanInNewThread}
                   onRespondToApproval={onRespondToApproval}
                   onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
