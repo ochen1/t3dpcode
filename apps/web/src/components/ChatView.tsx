@@ -13,6 +13,7 @@ import {
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
+  type TurnDispatchMode,
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
@@ -2608,8 +2609,13 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const onSend = async (e?: {
+    preventDefault: () => void;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+  }) => {
     e?.preventDefault();
+    const dispatchMode: TurnDispatchMode = e?.metaKey || e?.ctrlKey ? "steer" : "queue";
     const api = readEnvironmentApi(environmentId);
     if (
       !api ||
@@ -2669,6 +2675,63 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
+      return;
+    }
+    if (trimmed === "/fork" || trimmed === "/fork local") {
+      if (!activeProject || !isServerThread) {
+        setThreadError(activeThread.id, "Fork is available for saved project threads.");
+        return;
+      }
+      const createdAt = new Date().toISOString();
+      const forkedThreadId = newThreadId();
+      const importedMessages = activeThread.messages
+        .filter((message) => !message.streaming)
+        .map((message) => {
+          const importedMessage = {
+            messageId: newMessageId(),
+            role: message.role,
+            text: message.text,
+            createdAt: message.createdAt,
+            updatedAt: message.completedAt ?? message.createdAt,
+          };
+          if (!message.attachments || message.attachments.length === 0) {
+            return importedMessage;
+          }
+          return Object.assign(importedMessage, {
+            attachments: message.attachments.map((attachment) => ({
+              type: "image" as const,
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+            })),
+          });
+        });
+      await api.orchestration.dispatchCommand({
+        type: "thread.fork.create",
+        commandId: newCommandId(),
+        threadId: forkedThreadId,
+        sourceThreadId: activeThread.id,
+        projectId: activeProject.id,
+        title: `${activeThread.title} fork`,
+        modelSelection: activeThread.modelSelection,
+        runtimeMode: activeThread.runtimeMode,
+        interactionMode: activeThread.interactionMode,
+        branch: activeThread.branch,
+        worktreePath: activeThread.worktreePath,
+        importedMessages,
+        createdAt,
+      });
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId,
+          threadId: forkedThreadId,
+        },
+      });
       return;
     }
     if (!hasSendableContent) {
@@ -2754,6 +2817,7 @@ export default function ChatView(props: ChatViewProps) {
         role: "user",
         text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        dispatchMode,
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -2869,6 +2933,7 @@ export default function ChatView(props: ChatViewProps) {
         runtimeMode,
         interactionMode,
         ...(bootstrap ? { bootstrap } : {}),
+        dispatchMode,
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;

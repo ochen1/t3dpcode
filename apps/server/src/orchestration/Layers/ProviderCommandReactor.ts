@@ -46,7 +46,9 @@ type ProviderIntentEvent = Extract<
   OrchestrationEvent,
   {
     type:
+      | "thread.created"
       | "thread.runtime-mode-set"
+      | "thread.turn-queued"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
@@ -219,6 +221,11 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const queuedTurnStarts = new Map<
+    ThreadId,
+    Array<Extract<ProviderIntentEvent, { type: "thread.turn-queued" }>["payload"]>
+  >();
+  const drainingQueuedTurns = new Set<ThreadId>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -275,6 +282,34 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       session: input.session,
       createdAt: input.createdAt,
+    });
+
+  const enqueueQueuedTurnStart = (
+    payload: Extract<ProviderIntentEvent, { type: "thread.turn-queued" }>["payload"],
+  ) =>
+    Effect.sync(() => {
+      const current = queuedTurnStarts.get(payload.threadId) ?? [];
+      if (payload.dispatchMode === "steer") {
+        queuedTurnStarts.set(payload.threadId, [payload, ...current]);
+      } else {
+        queuedTurnStarts.set(payload.threadId, [...current, payload]);
+      }
+    });
+
+  const dequeueQueuedTurnStart = (threadId: ThreadId) =>
+    Effect.sync(() => {
+      const current = queuedTurnStarts.get(threadId) ?? [];
+      const next = current[0];
+      if (!next) {
+        return undefined;
+      }
+      const remaining = current.slice(1);
+      if (remaining.length === 0) {
+        queuedTurnStarts.delete(threadId);
+      } else {
+        queuedTurnStarts.set(threadId, remaining);
+      }
+      return next;
     });
 
   const setThreadSessionErrorOnTurnStartFailure = Effect.fnUntraced(function* (input: {
@@ -693,6 +728,52 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const processThreadCreated = Effect.fn("processThreadCreated")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.created" }>,
+  ) {
+    const sourceThreadId = event.payload.forkSourceThreadId;
+    if (!sourceThreadId) {
+      return;
+    }
+    yield* providerService
+      .forkThread({
+        sourceThreadId,
+        targetThreadId: event.payload.threadId,
+      })
+      .pipe(
+        Effect.flatMap(() => providerService.listSessions()),
+        Effect.flatMap((sessions) => {
+          const session = sessions.find((entry) => entry.threadId === event.payload.threadId);
+          if (!session) {
+            return Effect.void;
+          }
+          return setThreadSession({
+            threadId: event.payload.threadId,
+            session: {
+              threadId: event.payload.threadId,
+              status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+              providerName: session.provider,
+              ...(session.providerInstanceId !== undefined
+                ? { providerInstanceId: session.providerInstanceId }
+                : {}),
+              runtimeMode: event.payload.runtimeMode,
+              activeTurnId: null,
+              lastError: session.lastError ?? null,
+              updatedAt: session.updatedAt,
+            },
+            createdAt: event.payload.createdAt,
+          });
+        }),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider command reactor failed to fork provider thread", {
+            sourceThreadId,
+            targetThreadId: event.payload.threadId,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+  });
+
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
@@ -804,9 +885,69 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const threadProviderName = thread.session?.providerName ?? null;
+    if (event.payload.dispatchMode === "steer" && threadProviderName !== "codex") {
+      yield* enqueueQueuedTurnStart(event.payload);
+      yield* providerService.interruptTurn({ threadId: event.payload.threadId }).pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.turn.interrupt.failed",
+            summary: "Provider turn interrupt failed",
+            detail: Cause.pretty(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          }),
+        ),
+      );
+      return;
+    }
+
+    yield* (
+      event.payload.dispatchMode === "steer"
+        ? providerService.steerTurn(sendTurnRequest.value)
+        : providerService.sendTurn(sendTurnRequest.value)
+    ).pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+  });
+
+  const processTurnQueued = Effect.fn("processTurnQueued")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-queued" }>,
+  ) {
+    yield* enqueueQueuedTurnStart(event.payload);
+  });
+
+  const drainQueuedTurnsForThread = Effect.fn("drainQueuedTurnsForThread")(function* (
+    threadId: ThreadId,
+  ) {
+    if (drainingQueuedTurns.has(threadId)) {
+      return;
+    }
+    drainingQueuedTurns.add(threadId);
+    try {
+      const nextQueuedTurn = yield* dequeueQueuedTurnStart(threadId);
+      if (!nextQueuedTurn) {
+        return;
+      }
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.dispatch-queued",
+        commandId: serverCommandId("dispatch-queued-turn"),
+        threadId,
+        messageId: nextQueuedTurn.messageId,
+        ...(nextQueuedTurn.modelSelection !== undefined
+          ? { modelSelection: nextQueuedTurn.modelSelection }
+          : {}),
+        ...(nextQueuedTurn.titleSeed !== undefined ? { titleSeed: nextQueuedTurn.titleSeed } : {}),
+        runtimeMode: nextQueuedTurn.runtimeMode,
+        interactionMode: nextQueuedTurn.interactionMode,
+        ...(nextQueuedTurn.sourceProposedPlan !== undefined
+          ? { sourceProposedPlan: nextQueuedTurn.sourceProposedPlan }
+          : {}),
+        dispatchMode: "queue",
+        createdAt: nextQueuedTurn.createdAt,
+      });
+    } finally {
+      drainingQueuedTurns.delete(threadId);
+    }
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
@@ -988,6 +1129,9 @@ const make = Effect.gen(function* () {
       eventType: event.type,
     });
     switch (event.type) {
+      case "thread.created":
+        yield* processThreadCreated(event);
+        return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThread(event.payload.threadId);
         if (!thread?.session || thread.session.status === "stopped") {
@@ -1001,6 +1145,9 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.turn-queued":
+        yield* processTurnQueued(event);
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -1035,12 +1182,27 @@ const make = Effect.gen(function* () {
       }),
     );
 
+  const processQueueDrainEventSafely = (threadId: ThreadId) =>
+    drainQueuedTurnsForThread(threadId).pipe(
+      Effect.catchCause((cause) => {
+        if (Cause.hasInterruptsOnly(cause)) {
+          return Effect.failCause(cause);
+        }
+        return Effect.logWarning("provider command reactor failed to drain queued turn", {
+          threadId,
+          cause: Cause.pretty(cause),
+        });
+      }),
+    );
+
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
+        event.type === "thread.created" ||
         event.type === "thread.runtime-mode-set" ||
+        event.type === "thread.turn-queued" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
@@ -1054,6 +1216,13 @@ const make = Effect.gen(function* () {
 
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, processEvent),
+    );
+    yield* Effect.forkScoped(
+      Stream.runForEach(providerService.streamEvents, (event) =>
+        event.type === "turn.completed" || event.type === "turn.aborted"
+          ? processQueueDrainEventSafely(event.threadId)
+          : Effect.void,
+      ),
     );
   });
 

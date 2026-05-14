@@ -42,6 +42,7 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2TurnSteerResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnSteerResponse);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -127,10 +128,18 @@ export interface CodexThreadSnapshot {
   readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>;
 }
 
+export interface CodexThreadForkResult {
+  readonly threadId: string;
+  readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>;
+}
+
 export interface CodexSessionRuntimeShape {
   readonly start: () => Effect.Effect<ProviderSession, CodexSessionRuntimeError>;
   readonly getSession: Effect.Effect<ProviderSession>;
   readonly sendTurn: (
+    input: CodexSessionRuntimeSendTurnInput,
+  ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly steerTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
@@ -138,6 +147,7 @@ export interface CodexSessionRuntimeShape {
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  readonly forkThread: Effect.Effect<CodexThreadForkResult, CodexSessionRuntimeError>;
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -681,7 +691,10 @@ function updateSession(
 }
 
 function parseThreadSnapshot(
-  response: EffectCodexSchema.V2ThreadReadResponse | EffectCodexSchema.V2ThreadRollbackResponse,
+  response:
+    | EffectCodexSchema.V2ThreadReadResponse
+    | EffectCodexSchema.V2ThreadRollbackResponse
+    | EffectCodexSchema.V2ThreadForkResponse,
 ): CodexThreadSnapshot {
   return {
     threadId: response.thread.id,
@@ -1275,6 +1288,49 @@ export const makeCodexSessionRuntime = (
               : {}),
           } satisfies ProviderTurnStartResult;
         }),
+      steerTurn: (input) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const session = yield* Ref.get(sessionRef);
+          if (!session.activeTurnId) {
+            return yield* new CodexSessionRuntimeThreadIdMissingError({
+              threadId: options.threadId,
+            });
+          }
+          const turnInput: Array<EffectCodexSchema.V2TurnSteerParams__UserInput> = [];
+          if (input.input) {
+            turnInput.push({
+              type: "text",
+              text: input.input,
+            });
+          }
+          for (const attachment of input.attachments ?? []) {
+            turnInput.push(attachment);
+          }
+          const rawResponse = yield* client.raw.request("turn/steer", {
+            threadId: providerThreadId,
+            expectedTurnId: session.activeTurnId,
+            input: turnInput,
+          });
+          const response = yield* decodeV2TurnSteerResponse(rawResponse).pipe(
+            Effect.mapError((error) =>
+              toProtocolParseError("Invalid turn/steer response payload", error),
+            ),
+          );
+          const turnId = TurnId.make(response.turnId);
+          yield* updateSession(sessionRef, {
+            status: "running",
+            activeTurnId: turnId,
+          });
+          const resumedProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+          return {
+            threadId: options.threadId,
+            turnId,
+            ...(resumedProviderThreadId
+              ? { resumeCursor: { threadId: resumedProviderThreadId } }
+              : {}),
+          } satisfies ProviderTurnStartResult;
+        }),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
@@ -1309,6 +1365,13 @@ export const makeCodexSessionRuntime = (
           });
           return parseThreadSnapshot(response);
         }),
+      forkThread: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        const response = yield* client.request("thread/fork", {
+          threadId: providerThreadId,
+        });
+        return parseThreadSnapshot(response);
+      }),
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {
           const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId);

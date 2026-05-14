@@ -128,6 +128,9 @@ export const ProviderRequestKind = Schema.Literals(["command", "file-read", "fil
 export type ProviderRequestKind = typeof ProviderRequestKind.Type;
 export const AssistantDeliveryMode = Schema.Literals(["buffered", "streaming"]);
 export type AssistantDeliveryMode = typeof AssistantDeliveryMode.Type;
+export const TurnDispatchMode = Schema.Literals(["queue", "steer"]);
+export type TurnDispatchMode = typeof TurnDispatchMode.Type;
+export const DEFAULT_TURN_DISPATCH_MODE: TurnDispatchMode = "queue";
 export const ProviderApprovalDecision = Schema.Literals([
   "accept",
   "acceptForSession",
@@ -218,6 +221,7 @@ export const OrchestrationMessage = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  dispatchMode: Schema.optional(TurnDispatchMode),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -341,6 +345,9 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  forkSourceThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -495,6 +502,33 @@ const ThreadCreateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadHandoffImportedMessage = Schema.Struct({
+  messageId: MessageId,
+  role: OrchestrationMessageRole,
+  text: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+const ThreadForkCreateCommand = Schema.Struct({
+  type: Schema.Literal("thread.fork.create"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  importedMessages: Schema.Array(ThreadHandoffImportedMessage),
+  createdAt: IsoDateTime,
+});
+
 const ThreadDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.delete"),
   commandId: CommandId,
@@ -582,6 +616,9 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  dispatchMode: Schema.optional(TurnDispatchMode).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_DISPATCH_MODE)),
+  ),
   createdAt: IsoDateTime,
 });
 
@@ -601,6 +638,27 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  dispatchMode: Schema.optional(TurnDispatchMode).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_DISPATCH_MODE)),
+  ),
+  createdAt: IsoDateTime,
+});
+
+const ThreadDispatchQueuedTurnCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.dispatch-queued"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  dispatchMode: Schema.optional(TurnDispatchMode).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_DISPATCH_MODE)),
+  ),
   createdAt: IsoDateTime,
 });
 
@@ -659,6 +717,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadForkCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -680,6 +739,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadForkCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -780,6 +840,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadConversationRollbackCommand,
+  ThreadDispatchQueuedTurnCommand,
   ThreadConversationRollbackCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -802,6 +863,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
+  "thread.turn-queued",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -859,6 +921,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  forkSourceThreadId: Schema.optional(Schema.NullOr(ThreadId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -908,6 +973,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  dispatchMode: Schema.optional(TurnDispatchMode),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -924,6 +990,25 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  dispatchMode: TurnDispatchMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_DISPATCH_MODE)),
+  ),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadTurnQueuedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  dispatchMode: TurnDispatchMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TURN_DISPATCH_MODE)),
+  ),
   createdAt: IsoDateTime,
 });
 
@@ -1080,6 +1165,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.message-sent"),
     payload: ThreadMessageSentPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-queued"),
+    payload: ThreadTurnQueuedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

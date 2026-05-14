@@ -13,6 +13,7 @@ import {
   ModelSelection,
   NonNegativeInt,
   ThreadId,
+  ProviderForkThreadInput,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -695,6 +696,60 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const steerTurn: ProviderServiceShape["steerTurn"] = Effect.fn("steerTurn")(function* (rawInput) {
+    const parsed = yield* decodeInputOrValidationError({
+      operation: "ProviderService.steerTurn",
+      schema: ProviderSendTurnInput,
+      payload: rawInput,
+    });
+
+    const input = {
+      ...parsed,
+      attachments: parsed.attachments ?? [],
+    };
+    if (!input.input && input.attachments.length === 0) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        "Either input text or at least one attachment is required",
+      );
+    }
+
+    const routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.steerTurn",
+      allowRecovery: true,
+    });
+    if (!routed.adapter.steerTurn) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        `Provider '${routed.adapter.provider}' does not support steering active turns.`,
+      );
+    }
+
+    const turn = yield* routed.adapter.steerTurn(input);
+    yield* directory.upsert({
+      threadId: input.threadId,
+      provider: routed.adapter.provider,
+      providerInstanceId: routed.instanceId,
+      status: "running",
+      ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+      runtimePayload: {
+        ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+        activeTurnId: turn.turnId,
+        lastRuntimeEvent: "provider.steerTurn",
+        lastRuntimeEventAt: yield* nowIso,
+      },
+    });
+    yield* analytics.record("provider.turn.steered", {
+      provider: routed.adapter.provider,
+      model: input.modelSelection?.model,
+      interactionMode: input.interactionMode,
+      attachmentCount: input.attachments.length,
+      hasInput: typeof input.input === "string" && input.input.trim().length > 0,
+    });
+    return turn;
+  });
+
   const interruptTurn: ProviderServiceShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -976,6 +1031,48 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const forkThread: ProviderServiceShape["forkThread"] = Effect.fn("forkThread")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.forkThread",
+        schema: ProviderForkThreadInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.sourceThreadId,
+        operation: "ProviderService.forkThread",
+        allowRecovery: true,
+      });
+      if (!routed.adapter.forkThread) {
+        return yield* toValidationError(
+          "ProviderService.forkThread",
+          `Provider '${routed.adapter.provider}' does not support thread forking.`,
+        );
+      }
+
+      const result = yield* routed.adapter.forkThread(input);
+      const sourceBinding = yield* directory.getBinding(input.sourceThreadId);
+      const sourceRuntimeMode = Option.getOrUndefined(sourceBinding)?.runtimeMode ?? "full-access";
+      yield* directory.upsert({
+        threadId: input.targetThreadId,
+        provider: routed.adapter.provider,
+        providerInstanceId: routed.instanceId,
+        status: "running",
+        ...(result.resumeCursor !== undefined ? { resumeCursor: result.resumeCursor } : {}),
+        runtimeMode: sourceRuntimeMode,
+        runtimePayload: {
+          activeTurnId: null,
+          lastRuntimeEvent: "provider.forkThread",
+          lastRuntimeEventAt: yield* nowIso,
+        },
+      });
+      yield* analytics.record("provider.thread.forked", {
+        provider: routed.adapter.provider,
+      });
+      return result;
+    },
+  );
+
   const runStopAll = Effect.fn("runStopAll")(function* () {
     const threadIds = yield* directory.listThreadIds();
     const currentAdapters = yield* getAdapterEntries;
@@ -1035,6 +1132,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   return {
     startSession,
     sendTurn,
+    steerTurn,
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -1043,6 +1141,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getCapabilities,
     getInstanceInfo,
     rollbackConversation,
+    forkThread,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

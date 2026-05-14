@@ -1544,6 +1544,22 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
   });
 
+  const steerTurn: CodexAdapterShape["steerTurn"] = Effect.fn("steerTurn")(function* (input) {
+    const codexAttachments = yield* Effect.forEach(
+      input.attachments ?? [],
+      (attachment) => resolveAttachment(input, attachment),
+      { concurrency: 1 },
+    );
+
+    const session = yield* requireSession(input.threadId);
+    return yield* session.runtime
+      .steerTurn({
+        ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
+      })
+      .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/steer", cause)));
+  });
+
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
     const session = sessions.get(threadId);
     if (!session || session.stopped) {
@@ -1603,6 +1619,29 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       })),
     );
   };
+
+  const forkThread: CodexAdapterShape["forkThread"] = (input) =>
+    Effect.gen(function* () {
+      const sourceSession = yield* requireSession(input.sourceThreadId);
+      const sourceProviderSession = yield* sourceSession.runtime.getSession;
+      const forked = yield* sourceSession.runtime.forkThread.pipe(
+        Effect.mapError((cause) =>
+          mapCodexRuntimeError(input.sourceThreadId, "thread/fork", cause),
+        ),
+      );
+      const started = yield* startSession({
+        threadId: input.targetThreadId,
+        provider: PROVIDER,
+        providerInstanceId: boundInstanceId,
+        cwd: sourceProviderSession.cwd ?? process.cwd(),
+        runtimeMode: sourceProviderSession.runtimeMode,
+        resumeCursor: { threadId: forked.threadId },
+      });
+      return {
+        threadId: input.targetThreadId,
+        ...(started.resumeCursor !== undefined ? { resumeCursor: started.resumeCursor } : {}),
+      };
+    });
 
   const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
     requireSession(threadId).pipe(
@@ -1688,9 +1727,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
+    steerTurn,
     interruptTurn,
     readThread,
     rollbackThread,
+    forkThread,
     respondToRequest,
     respondToUserInput,
     stopSession,

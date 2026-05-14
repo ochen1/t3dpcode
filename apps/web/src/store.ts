@@ -177,6 +177,7 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
     id: message.id,
     role: message.role,
     text: message.text,
+    ...(message.dispatchMode !== undefined ? { dispatchMode: message.dispatchMode } : {}),
     turnId: message.turnId,
     createdAt: message.createdAt,
     streaming: message.streaming,
@@ -240,6 +241,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     modelSelection: normalizeModelSelection(thread.modelSelection),
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
+    forkSourceThreadId: thread.forkSourceThreadId ?? null,
     session: thread.session ? mapSession(thread.session) : null,
     messages: thread.messages.map((message) => mapMessage(environmentId, message)),
     proposedPlans: thread.proposedPlans.map(mapProposedPlan),
@@ -1282,6 +1284,7 @@ function applyEnvironmentOrchestrationEvent(
           interactionMode: event.payload.interactionMode,
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
+          forkSourceThreadId: event.payload.forkSourceThreadId,
           latestTurn: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
@@ -1344,6 +1347,7 @@ function applyEnvironmentOrchestrationEvent(
       }));
 
     case "thread.turn-start-requested":
+    case "thread.turn-queued":
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
         ...(event.payload.modelSelection !== undefined
@@ -1389,6 +1393,9 @@ function applyEnvironmentOrchestrationEvent(
           ...(event.payload.attachments !== undefined
             ? { attachments: event.payload.attachments }
             : {}),
+          ...(event.payload.dispatchMode !== undefined
+            ? { dispatchMode: event.payload.dispatchMode }
+            : {}),
           turnId: event.payload.turnId,
           streaming: event.payload.streaming,
           createdAt: event.payload.createdAt,
@@ -1408,6 +1415,9 @@ function applyEnvironmentOrchestrationEvent(
                         : entry.text,
                     streaming: message.streaming,
                     ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
+                    ...(message.dispatchMode !== undefined
+                      ? { dispatchMode: message.dispatchMode }
+                      : {}),
                     ...(message.streaming
                       ? entry.completedAt !== undefined
                         ? { completedAt: entry.completedAt }

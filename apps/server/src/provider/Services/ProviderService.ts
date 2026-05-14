@@ -13,6 +13,8 @@
  */
 import type {
   ProviderInterruptTurnInput,
+  ProviderForkThreadInput,
+  ProviderForkThreadResult,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -48,6 +50,13 @@ export interface ProviderServiceShape {
    * Send a provider turn.
    */
   readonly sendTurn: (
+    input: ProviderSendTurnInput,
+  ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /**
+   * Steer an active provider turn.
+   */
+  readonly steerTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
 
@@ -104,6 +113,13 @@ export interface ProviderServiceShape {
     readonly threadId: ThreadId;
     readonly numTurns: number;
   }) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Create a provider-native fork from an existing provider thread.
+   */
+  readonly forkThread: (
+    input: ProviderForkThreadInput,
+  ) => Effect.Effect<ProviderForkThreadResult, ProviderServiceError>;
 
   /**
    * Canonical provider runtime event stream.

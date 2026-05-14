@@ -16,6 +16,7 @@ import type {
   CheckpointRef,
   ProviderInteractionMode,
   RuntimeMode,
+  TurnDispatchMode,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -48,6 +49,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   text: string;
   attachments?: ChatAttachment[];
+  dispatchMode?: TurnDispatchMode;
   turnId?: TurnId | null;
   createdAt: string;
   completedAt?: string | undefined;
@@ -102,6 +104,7 @@ export interface Thread {
   modelSelection: ModelSelection;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  forkSourceThreadId?: ThreadId | null;
   session: ThreadSession | null;
   messages: ChatMessage[];
   proposedPlans: ProposedPlan[];

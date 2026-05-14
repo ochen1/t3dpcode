@@ -11,6 +11,8 @@ import type {
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderDriverKind,
+  ProviderForkThreadInput,
+  ProviderForkThreadResult,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -64,6 +66,13 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
 
   /**
+   * Steer the currently active provider turn when the provider supports it.
+   */
+  readonly steerTurn?: (
+    input: ProviderSendTurnInput,
+  ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /**
    * Interrupt an active turn.
    */
   readonly interruptTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void, TError>;
@@ -113,6 +122,13 @@ export interface ProviderAdapterShape<TError> {
     threadId: ThreadId,
     numTurns: number,
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /**
+   * Create a provider-native fork of a source thread for a newly-created app thread.
+   */
+  readonly forkThread?: (
+    input: ProviderForkThreadInput,
+  ) => Effect.Effect<ProviderForkThreadResult, TError>;
 
   /**
    * Stop all sessions owned by this adapter.
