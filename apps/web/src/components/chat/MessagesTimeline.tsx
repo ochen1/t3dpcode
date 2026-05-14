@@ -413,7 +413,7 @@ function RevertUserMessageButton({
       title={
         canRevertAgentWork
           ? "Revert to this message"
-          : "Undo becomes available after a reply is checkpointed"
+          : "Undo becomes available after the provider replies"
       }
     >
       <Undo2Icon className="size-3" />

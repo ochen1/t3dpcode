@@ -1563,8 +1563,7 @@ export default function ChatView(props: ChatViewProps) {
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
-  const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
-    useTurnDiffSummaries(activeThread);
+  const { turnDiffSummaries } = useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
     const byMessageId = new Map<MessageId, TurnDiffSummary>();
     for (const summary of turnDiffSummaries) {
@@ -1573,7 +1572,7 @@ export default function ChatView(props: ChatViewProps) {
     }
     return byMessageId;
   }, [turnDiffSummaries]);
-  const revertTurnCountByUserMessageId = useMemo(() => {
+  const rollbackTurnCountByUserMessageId = useMemo(() => {
     const byUserMessageId = new Map<MessageId, number>();
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const entry = timelineEntries[index];
@@ -1581,30 +1580,23 @@ export default function ChatView(props: ChatViewProps) {
         continue;
       }
 
+      const removedTurnIds = new Set<TurnId>();
       for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
         const nextEntry = timelineEntries[nextIndex];
         if (!nextEntry || nextEntry.kind !== "message") {
           continue;
         }
-        if (nextEntry.message.role === "user") {
-          break;
+        if (nextEntry.message.turnId !== null && nextEntry.message.turnId !== undefined) {
+          removedTurnIds.add(nextEntry.message.turnId);
         }
-        const summary = turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
-        if (!summary) {
-          continue;
-        }
-        const turnCount =
-          summary.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[summary.turnId];
-        if (typeof turnCount !== "number") {
-          break;
-        }
-        byUserMessageId.set(entry.message.id, Math.max(0, turnCount - 1));
-        break;
+      }
+      if (removedTurnIds.size > 0) {
+        byUserMessageId.set(entry.message.id, removedTurnIds.size);
       }
     }
 
     return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  }, [timelineEntries]);
 
   const completionSummary = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -2550,65 +2542,6 @@ export default function ChatView(props: ChatViewProps) {
     toggleTerminalVisibility,
   ]);
 
-  const onRevertToTurnCount = useCallback(
-    async (turnCount: number) => {
-      const api = readEnvironmentApi(environmentId);
-      const localApi = readLocalApi();
-      if (!api || !localApi || !activeThread || isRevertingCheckpoint) return;
-
-      if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
-        setThreadError(
-          activeThread.id,
-          `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
-        );
-        return;
-      }
-      if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-        return;
-      }
-      const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
-        ].join("\n"),
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      setIsRevertingCheckpoint(true);
-      setThreadError(activeThread.id, null);
-      try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.checkpoint.revert",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          turnCount,
-          createdAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        setThreadError(
-          activeThread.id,
-          err instanceof Error ? err.message : "Failed to revert thread state.",
-        );
-      }
-      setIsRevertingCheckpoint(false);
-    },
-    [
-      activeThread,
-      activeEnvironmentUnavailable,
-      activeEnvironmentUnavailableLabel,
-      environmentId,
-      isConnecting,
-      isRevertingCheckpoint,
-      isSendBusy,
-      phase,
-      setThreadError,
-    ],
-  );
-
   const onSend = async (e?: {
     preventDefault: () => void;
     metaKey?: boolean;
@@ -3542,19 +3475,53 @@ export default function ChatView(props: ChatViewProps) {
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
   );
-  // Both the Map and the revert handler are read from refs at call-time so
+  // Both the Map and the rollback handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
-  const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
-  revertTurnCountRef.current = revertTurnCountByUserMessageId;
-  const onRevertToTurnCountRef = useRef(onRevertToTurnCount);
-  onRevertToTurnCountRef.current = onRevertToTurnCount;
-  const onRevertUserMessage = useCallback((messageId: MessageId) => {
-    const targetTurnCount = revertTurnCountRef.current.get(messageId);
-    if (typeof targetTurnCount !== "number") {
-      return;
-    }
-    void onRevertToTurnCountRef.current(targetTurnCount);
-  }, []);
+  const rollbackTurnCountRef = useRef(rollbackTurnCountByUserMessageId);
+  rollbackTurnCountRef.current = rollbackTurnCountByUserMessageId;
+  const activeThreadStateRef = useRef(activeThread);
+  activeThreadStateRef.current = activeThread;
+  const isRevertingCheckpointRef = useRef(isRevertingCheckpoint);
+  isRevertingCheckpointRef.current = isRevertingCheckpoint;
+  const onRevertUserMessage = useCallback(
+    (messageId: MessageId) => {
+      const numTurns = rollbackTurnCountRef.current.get(messageId);
+      const thread = activeThreadStateRef.current;
+      if (
+        !thread ||
+        isRevertingCheckpointRef.current ||
+        typeof numTurns !== "number" ||
+        numTurns <= 0
+      ) {
+        return;
+      }
+      const api = readEnvironmentApi(thread.environmentId);
+      if (!api) {
+        return;
+      }
+      setIsRevertingCheckpoint(true);
+      setThreadError(thread.id, null);
+      void api.orchestration
+        .dispatchCommand({
+          type: "thread.conversation.rollback",
+          commandId: newCommandId(),
+          threadId: thread.id,
+          messageId,
+          numTurns,
+          createdAt: new Date().toISOString(),
+        })
+        .catch((err: unknown) => {
+          setThreadError(
+            thread.id,
+            err instanceof Error ? err.message : "Failed to revert thread state.",
+          );
+        })
+        .finally(() => {
+          setIsRevertingCheckpoint(false);
+        });
+    },
+    [setThreadError],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3632,7 +3599,7 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadEnvironmentId={activeThread.environmentId}
               routeThreadKey={routeThreadKey}
               onOpenTurnDiff={onOpenTurnDiff}
-              revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+              revertTurnCountByUserMessageId={rollbackTurnCountByUserMessageId}
               onRevertUserMessage={onRevertUserMessage}
               isRevertingCheckpoint={isRevertingCheckpoint}
               onImageExpand={onExpandTimelineImage}
@@ -3722,6 +3689,8 @@ export default function ChatView(props: ChatViewProps) {
                   scheduleStickToBottom={scrollToEnd}
                   onSend={onSend}
                   onInterrupt={onInterrupt}
+                  onQueue={() => onSend({ preventDefault: () => undefined })}
+                  onSteer={() => onSend({ preventDefault: () => undefined, metaKey: true })}
                   onImplementPlanInNewThread={onImplementPlanInNewThread}
                   onRespondToApproval={onRespondToApproval}
                   onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
