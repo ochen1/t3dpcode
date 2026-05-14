@@ -691,14 +691,8 @@ describe("workEntryIndicatesToolFailure", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
-  it("omits tool started entries and keeps completed entries", () => {
+  it("keeps started tool entries so pending tool calls appear immediately", () => {
     const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "tool-complete",
-        createdAt: "2026-02-23T00:00:03.000Z",
-        summary: "Tool call complete",
-        kind: "tool.completed",
-      }),
       makeActivity({
         id: "tool-start",
         createdAt: "2026-02-23T00:00:02.000Z",
@@ -707,11 +701,43 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-start"]);
   });
 
-  it("omits task.started but shows task.progress and task.completed", () => {
+  it("omits command start entries that do not include useful command metadata", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "empty-command-start",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        summary: "Ran command",
+        kind: "tool.started",
+        payload: {
+          itemType: "command_execution",
+        },
+      }),
+      makeActivity({
+        id: "command-start",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        summary: "Ran command",
+        kind: "tool.started",
+        payload: {
+          itemType: "command_execution",
+          data: {
+            item: {
+              command: ["bun", "run", "lint"],
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["command-start"]);
+    expect(entries[0]?.command).toBe("bun run lint");
+  });
+
+  it("omits task start and completion lifecycle entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
         id: "task-start",
@@ -736,8 +762,8 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities);
-    expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["task-progress"]);
   });
 
   it("uses payload summary as label for task entries when available", () => {
@@ -756,12 +782,12 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.label).toBe("Searching for API endpoints");
   });
 
-  it("uses payload detail as label for task.completed and preserves error tone", () => {
+  it("uses payload detail as label for task.progress entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
-        id: "task-completed-failed",
+        id: "task-progress-failed",
         createdAt: "2026-02-23T00:00:03.000Z",
-        kind: "task.completed",
+        kind: "task.progress",
         summary: "Task failed",
         tone: "error",
         payload: { detail: "Failed to deploy changes" },
@@ -770,7 +796,7 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities);
     expect(entries[0]?.label).toBe("Failed to deploy changes");
-    expect(entries[0]?.tone).toBe("error");
+    expect(entries[0]?.tone).toBe("thinking");
   });
 
   it("keeps tool entries from every turn and tags each with its turn id", () => {
@@ -815,6 +841,35 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
+  });
+
+  it("omits account rate-limit and context-window configured noise", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "rate-limits",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "account.rate-limits.updated",
+        summary: "Rate limits updated",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "context-configured",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "context-window.configured",
+        summary: "Context window configured",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "tool-complete",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        summary: "Ran command",
+        tone: "tool",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
@@ -1298,6 +1353,87 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBeUndefined();
   });
 
+  it("keeps command stdout and stderr available as expandable output sections", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-output",
+        createdAt: "2026-04-16T22:40:42.221Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "toolu_command_output",
+            kind: "execute",
+            rawInput: {},
+            rawOutput: {
+              exitCode: 1,
+              stdout: "building\n",
+              stderr: "failed to compile\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.outputSections).toEqual([
+      { label: "stdout", text: "building", tone: "stdout" },
+      { label: "stderr", text: "failed to compile", tone: "stderr" },
+      { label: "exit", text: "exit code 1", tone: "stderr" },
+    ]);
+  });
+
+  it("uses the completed tool output after lifecycle rows collapse", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-started",
+        createdAt: "2026-04-16T22:40:41.221Z",
+        kind: "tool.started",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "toolu_lifecycle_output",
+            item: {
+              command: ["bun", "run", "build"],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "command-completed",
+        createdAt: "2026-04-16T22:40:42.221Z",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            toolCallId: "toolu_lifecycle_output",
+            rawOutput: {
+              exitCode: 0,
+              stdout: "Build complete\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "command-completed",
+      command: "bun run build",
+      outputSections: [
+        { label: "stdout", text: "Build complete", tone: "stdout" },
+        { label: "exit", text: "exit code 0", tone: "stdout" },
+      ],
+    });
+  });
+
   it("collapses legacy completed tool rows that are missing tool metadata", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1575,6 +1711,29 @@ describe("deriveWorkLogEntries context window handling", () => {
 
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
+  });
+
+  it("keeps null-turn context compaction entries while filtering to latest turn", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "compaction-1",
+          kind: "context-compaction",
+          summary: "Context compacted",
+          tone: "info",
+        }),
+        makeActivity({
+          id: "older-tool",
+          turnId: "turn-1",
+          kind: "tool.completed",
+          summary: "Older tool",
+          tone: "tool",
+        }),
+      ],
+      TurnId.make("turn-2"),
+    );
+
+    expect(entries.map((entry) => entry.id)).toEqual(["compaction-1"]);
   });
 });
 

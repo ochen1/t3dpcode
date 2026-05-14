@@ -1560,6 +1560,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const { workEntry, workspaceRoot } = props;
   const activity = use(TimelineRowActivityCtx);
   const [expanded, setExpanded] = useState(false);
+  const [outputExpanded, setOutputExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const entryIconName = showWarningIndicator ? "x" : workEntryIconName(workEntry);
@@ -1612,6 +1613,10 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
         },
       }
     : {};
+  const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
+  const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const outputSections = workEntry.outputSections ?? [];
+  const hasOutput = outputSections.length > 0;
 
   return (
     <div
@@ -1696,7 +1701,47 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </span>
           </div>
         </div>
+        {hasOutput ? (
+          <button
+            type="button"
+            aria-expanded={outputExpanded}
+            className="flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] leading-none text-muted-foreground/55 transition-colors hover:bg-muted/50 hover:text-foreground/75"
+            onClick={(event) => {
+              event.stopPropagation();
+              setOutputExpanded((value) => !value);
+            }}
+            title={outputExpanded ? "Hide output" : "Show output"}
+          >
+            <span>Output</span>
+            {outputExpanded ? (
+              <ChevronUpIcon className="size-3" aria-hidden="true" />
+            ) : (
+              <ChevronDownIcon className="size-3" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
       </div>
+      {hasChangedFiles && !previewIsChangedFiles ? (
+        <div className="mt-1 flex flex-wrap gap-1 pl-6">
+          {workEntry.changedFiles?.slice(0, 4).map((filePath) => {
+            const displayPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
+            return (
+              <span
+                key={`${workEntry.id}:${filePath}`}
+                className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
+                title={displayPath}
+              >
+                {displayPath}
+              </span>
+            );
+          })}
+          {(workEntry.changedFiles?.length ?? 0) > 4 ? (
+            <span className="px-1 text-[10px] text-muted-foreground/55">
+              +{(workEntry.changedFiles?.length ?? 0) - 4}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       {expanded && canExpand && expandedBody ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
@@ -1708,6 +1753,46 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </pre>
         </div>
       ) : null}
+      {hasOutput && outputExpanded ? <WorkEntryOutputPanel sections={outputSections} /> : null}
     </div>
   );
 });
+
+function WorkEntryOutputPanel({
+  sections,
+}: {
+  sections: NonNullable<TimelineWorkEntry["outputSections"]>;
+}) {
+  return (
+    <div className="mt-1.5 ml-7 overflow-hidden rounded-md border border-border/45 bg-background/80">
+      {sections.map((section) => (
+        <div
+          key={`${section.label}:${section.tone ?? "output"}`}
+          className={cn(section !== sections[0] && "border-t border-border/35")}
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-border/25 bg-muted/25 px-2 py-1">
+            <span
+              className={cn(
+                "font-mono text-[10px] uppercase tracking-[0.08em]",
+                outputSectionLabelClass(section.tone),
+              )}
+            >
+              {section.label}
+            </span>
+          </div>
+          <pre className="max-h-72 overflow-auto px-2 py-1.5 font-mono text-[11px] leading-4 whitespace-pre-wrap text-foreground/78">
+            {section.text}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function outputSectionLabelClass(
+  tone: NonNullable<TimelineWorkEntry["outputSections"]>[number]["tone"],
+) {
+  if (tone === "stderr") return "text-rose-300/70 dark:text-rose-300/70";
+  if (tone === "stdout") return "text-emerald-300/70 dark:text-emerald-300/70";
+  return "text-muted-foreground/65";
+}
