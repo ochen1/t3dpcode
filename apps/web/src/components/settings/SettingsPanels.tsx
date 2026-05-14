@@ -1,4 +1,11 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveX,
+  BellRingIcon,
+  LoaderIcon,
+  PlusIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
@@ -25,6 +32,10 @@ import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Result from "effect/Result";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+import {
+  requestBrowserNotificationPermission,
+  sendTestAgentBrowserNotification,
+} from "../../agentBrowserNotifications";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -402,6 +413,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.enableProviderUpdateChecks !==
+      DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
+        ? ["Provider update checks"]
+        : []),
+      ...(settings.enableDesktopNotifications !==
+      DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications
+        ? ["Desktop notifications"]
+        : []),
       ...(Duration.toMillis(settings.automaticGitFetchInterval) !==
       Duration.toMillis(DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval)
         ? ["Automatic Git fetch interval"]
@@ -434,6 +453,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.automaticGitFetchInterval,
+      settings.enableProviderUpdateChecks,
+      settings.enableDesktopNotifications,
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
@@ -460,6 +481,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
+      enableDesktopNotifications: DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
@@ -482,6 +505,30 @@ export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const observability = useAtomValue(primaryServerObservabilityAtom);
+  const handleTestDesktopNotification = useCallback(() => {
+    void sendTestAgentBrowserNotification().then((permission) => {
+      if (permission === "denied") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Notifications are blocked",
+            description: "Allow notifications in your browser settings, then try again.",
+          }),
+        );
+        return;
+      }
+
+      if (permission === null) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Notifications are unavailable",
+            description: "This browser does not support system notifications.",
+          }),
+        );
+      }
+    });
+  }, []);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
@@ -702,6 +749,43 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Check provider versions"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Desktop notifications"
+          description="Show a system notification when an agent turn finishes."
+          resetAction={
+            settings.enableDesktopNotifications !==
+            DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications ? (
+              <SettingResetButton
+                label="desktop notifications"
+                onClick={() =>
+                  updateSettings({
+                    enableDesktopNotifications: DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <>
+              <Button variant="outline" size="xs" onClick={handleTestDesktopNotification}>
+                <BellRingIcon />
+                Test
+              </Button>
+              <Switch
+                checked={settings.enableDesktopNotifications}
+                onCheckedChange={(checked) => {
+                  const enabled = Boolean(checked);
+                  updateSettings({ enableDesktopNotifications: enabled });
+                  if (enabled) {
+                    void requestBrowserNotificationPermission();
+                  }
+                }}
+                aria-label="Show desktop notifications"
+              />
+            </>
           }
         />
 
