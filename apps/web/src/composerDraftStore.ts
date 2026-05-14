@@ -92,6 +92,37 @@ export interface ComposerImageAttachment extends Omit<ChatImageAttachment, "prev
   file: File;
 }
 
+export interface QueuedComposerChatTurn {
+  readonly id: string;
+  readonly kind: "chat";
+  readonly createdAt: string;
+  readonly previewText: string;
+  readonly prompt: string;
+  readonly images: readonly ComposerImageAttachment[];
+  readonly terminalContexts: readonly TerminalContextDraft[];
+  readonly selectedPromptEffort: string | null;
+  readonly selectedModelSelection: ModelSelection;
+  readonly selectedProvider: ProviderDriverKind;
+  readonly selectedModel: string;
+  readonly selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+}
+
+export interface QueuedComposerPlanFollowUp {
+  readonly id: string;
+  readonly kind: "plan-follow-up";
+  readonly createdAt: string;
+  readonly previewText: string;
+  readonly text: string;
+  readonly interactionMode: "default" | "plan";
+  readonly selectedPromptEffort: string | null;
+  readonly selectedModelSelection: ModelSelection;
+  readonly selectedProvider: ProviderDriverKind;
+  readonly selectedModel: string;
+  readonly selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+}
+
+export type QueuedComposerTurn = QueuedComposerChatTurn | QueuedComposerPlanFollowUp;
+
 const PersistedTerminalContextDraft = Schema.Struct({
   id: Schema.String,
   threadId: ThreadId,
@@ -253,6 +284,7 @@ export interface ComposerThreadDraftState {
   nonPersistedImageIds: string[];
   persistedAttachments: PersistedComposerImageAttachment[];
   terminalContexts: TerminalContextDraft[];
+  queuedTurns: QueuedComposerTurn[];
   /**
    * Element-pick attachments captured from the in-app preview browser. The
    * full payload (selector / html / styles / source frame) is persisted
@@ -434,6 +466,13 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
+  enqueueQueuedTurn: (threadRef: ComposerThreadTarget, queuedTurn: QueuedComposerTurn) => void;
+  insertQueuedTurn: (
+    threadRef: ComposerThreadTarget,
+    queuedTurn: QueuedComposerTurn,
+    index: number,
+  ) => void;
+  removeQueuedTurn: (threadRef: ComposerThreadTarget, queuedTurnId: string) => void;
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => void;
   addImages: (threadRef: ComposerThreadTarget, images: ComposerImageAttachment[]) => void;
   removeImage: (threadRef: ComposerThreadTarget, imageId: string) => void;
@@ -558,12 +597,14 @@ const EMPTY_TERMINAL_CONTEXTS: TerminalContextDraft[] = [];
 const EMPTY_ELEMENT_CONTEXTS: ElementContextDraft[] = [];
 const EMPTY_PREVIEW_ANNOTATIONS: PreviewAnnotationPayload[] = [];
 const EMPTY_REVIEW_COMMENTS: ReviewCommentContext[] = [];
+const EMPTY_QUEUED_TURNS: QueuedComposerTurn[] = [];
 Object.freeze(EMPTY_IMAGES);
 Object.freeze(EMPTY_IDS);
 Object.freeze(EMPTY_PERSISTED_ATTACHMENTS);
 Object.freeze(EMPTY_ELEMENT_CONTEXTS);
 Object.freeze(EMPTY_PREVIEW_ANNOTATIONS);
 Object.freeze(EMPTY_REVIEW_COMMENTS);
+Object.freeze(EMPTY_QUEUED_TURNS);
 const EMPTY_MODEL_SELECTION_BY_PROVIDER: Partial<Record<ProviderDriverKind, ModelSelection>> =
   Object.freeze({});
 const EMPTY_COMPOSER_DRAFT_MODEL_STATE = Object.freeze<ComposerDraftModelState>({
@@ -577,6 +618,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   nonPersistedImageIds: EMPTY_IDS,
   persistedAttachments: EMPTY_PERSISTED_ATTACHMENTS,
   terminalContexts: EMPTY_TERMINAL_CONTEXTS,
+  queuedTurns: EMPTY_QUEUED_TURNS,
   elementContexts: EMPTY_ELEMENT_CONTEXTS,
   previewAnnotations: EMPTY_PREVIEW_ANNOTATIONS,
   reviewComments: EMPTY_REVIEW_COMMENTS,
@@ -599,6 +641,7 @@ export function createEmptyThreadDraft(): ComposerThreadDraftState {
     nonPersistedImageIds: [],
     persistedAttachments: [],
     terminalContexts: [],
+    queuedTurns: [],
     elementContexts: [],
     previewAnnotations: [],
     reviewComments: [],
@@ -672,6 +715,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.images.length === 0 &&
     draft.persistedAttachments.length === 0 &&
     draft.terminalContexts.length === 0 &&
+    draft.queuedTurns.length === 0 &&
     draft.elementContexts.length === 0 &&
     draft.previewAnnotations.length === 0 &&
     draft.reviewComments.length === 0 &&
@@ -1034,6 +1078,14 @@ function revokeDraftThreadPreviewUrls(draft: ComposerThreadDraftState | undefine
   }
   for (const image of draft.images) {
     revokeObjectPreviewUrl(image.previewUrl);
+  }
+  for (const queuedTurn of draft.queuedTurns) {
+    if (queuedTurn.kind !== "chat") {
+      continue;
+    }
+    for (const image of queuedTurn.images) {
+      revokeObjectPreviewUrl(image.previewUrl);
+    }
   }
 }
 
@@ -2121,6 +2173,7 @@ function toHydratedThreadDraft(
         ...context,
         text: "",
       })) ?? [],
+    queuedTurns: [],
     elementContexts:
       persistedDraft.elementContexts?.map((context) => ({
         ...context,
@@ -2824,6 +2877,70 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextDraft: ComposerThreadDraftState = {
               ...base,
               interactionMode: nextInteractionMode,
+            };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            if (shouldRemoveDraft(nextDraft)) {
+              delete nextDraftsByThreadKey[threadKey];
+            } else {
+              nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        enqueueQueuedTurn: (threadRef, queuedTurn) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: {
+                  ...existing,
+                  queuedTurns: [...existing.queuedTurns, queuedTurn],
+                },
+              },
+            };
+          });
+        },
+        insertQueuedTurn: (threadRef, queuedTurn, index) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            const boundedIndex = Math.max(0, Math.min(existing.queuedTurns.length, index));
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: {
+                  ...existing,
+                  queuedTurns: [
+                    ...existing.queuedTurns.slice(0, boundedIndex),
+                    queuedTurn,
+                    ...existing.queuedTurns.slice(boundedIndex),
+                  ],
+                },
+              },
+            };
+          });
+        },
+        removeQueuedTurn: (threadRef, queuedTurnId) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0 || queuedTurnId.length === 0) {
+            return;
+          }
+          set((state) => {
+            const current = state.draftsByThreadKey[threadKey];
+            if (!current || current.queuedTurns.every((entry) => entry.id !== queuedTurnId)) {
+              return state;
+            }
+            const nextDraft: ComposerThreadDraftState = {
+              ...current,
+              queuedTurns: current.queuedTurns.filter((entry) => entry.id !== queuedTurnId),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
