@@ -533,6 +533,33 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "tool.progress": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "tool",
+          kind: "tool.updated",
+          summary: event.payload.toolName ?? event.payload.summary ?? "MCP tool call",
+          payload: {
+            itemType: "mcp_tool_call",
+            title: "MCP tool call",
+            ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
+            data: {
+              ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+              ...(event.payload.toolName ? { toolName: event.payload.toolName } : {}),
+              ...(event.payload.summary ? { summary: event.payload.summary } : {}),
+              ...(event.payload.elapsedSeconds !== undefined
+                ? { elapsedSeconds: event.payload.elapsedSeconds }
+                : {}),
+            },
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "item.updated": {
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
@@ -546,6 +573,7 @@ function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool updated",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
@@ -569,6 +597,7 @@ function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
           },
@@ -591,6 +620,7 @@ function runtimeEventToActivities(
           summary: `${event.payload.title ?? "Tool"} started`,
           payload: {
             itemType: event.payload.itemType,
+            ...(event.payload.title ? { title: event.payload.title } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,

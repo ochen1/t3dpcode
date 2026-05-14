@@ -21,6 +21,7 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from "./types";
+import { deriveReadableToolTitle, normalizeCompactToolLabel } from "./lib/toolCallLabel";
 
 export type ProviderPickerKind = ProviderDriverKind;
 
@@ -57,6 +58,7 @@ export interface WorkLogEntry {
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
+  toolName?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
 }
@@ -65,6 +67,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
   toolCallId?: string;
+  toolName?: string;
 }
 
 export interface PendingApproval {
@@ -518,6 +521,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const commandPreview = extractToolCommand(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
+  const toolName = extractToolName(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
   const taskSummary =
     isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
@@ -551,6 +555,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           ? "info"
           : activity.tone,
     activityKind: activity.kind,
+    ...(toolName ? { toolName } : {}),
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
@@ -566,14 +571,23 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
   }
-  if (title) {
-    entry.toolTitle = title;
-  }
   if (itemType) {
     entry.itemType = itemType;
   }
   if (requestKind) {
     entry.requestKind = requestKind;
+  }
+  const readableTitle = deriveReadableToolTitle({
+    title,
+    fallbackLabel: activity.summary,
+    itemType,
+    requestKind,
+    command: commandPreview.command,
+    payload,
+    isRunning: activity.kind !== "tool.completed",
+  });
+  if (readableTitle) {
+    entry.toolTitle = readableTitle;
   }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
@@ -637,6 +651,7 @@ function mergeDerivedWorkLogEntries(
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
   const collapseKey = next.collapseKey ?? previous.collapseKey;
+  const toolName = next.toolName ?? previous.toolName;
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   return {
     ...previous,
@@ -649,6 +664,7 @@ function mergeDerivedWorkLogEntries(
     ...(itemType ? { itemType } : {}),
     ...(requestKind ? { requestKind } : {}),
     ...(collapseKey ? { collapseKey } : {}),
+    ...(toolName ? { toolName } : {}),
     ...(toolCallId ? { toolCallId } : {}),
   };
 }
@@ -672,16 +688,20 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
     return `tool:${entry.toolCallId}`;
   }
   const normalizedLabel = normalizeCompactToolLabel(entry.toolTitle ?? entry.label);
-  const detail = entry.detail?.trim() ?? "";
   const itemType = entry.itemType ?? "";
-  if (normalizedLabel.length === 0 && detail.length === 0 && itemType.length === 0) {
+  const requestKind = entry.requestKind ?? "";
+  const toolName = entry.toolName ?? "";
+  const detail = entry.detail?.trim() ?? "";
+  if (
+    normalizedLabel.length === 0 &&
+    detail.length === 0 &&
+    itemType.length === 0 &&
+    requestKind.length === 0 &&
+    toolName.length === 0
+  ) {
     return undefined;
   }
-  return [itemType, normalizedLabel, detail].join("\u001f");
-}
-
-function normalizeCompactToolLabel(value: string): string {
-  return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
+  return [itemType, normalizedLabel, requestKind, toolName, detail].join("\u001f");
 }
 
 function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPlanState {
@@ -893,6 +913,20 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
 
 function extractToolTitle(payload: Record<string, unknown> | null): string | null {
   return asTrimmedString(payload?.title);
+}
+
+function extractToolName(payload: Record<string, unknown> | null): string | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemInput = asRecord(item?.input);
+  const candidates = [data?.toolName, data?.tool, item?.toolName, item?.name, itemInput?.toolName];
+  for (const candidate of candidates) {
+    const normalized = asTrimmedString(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
 }
 
 function extractToolCallId(payload: Record<string, unknown> | null): string | null {

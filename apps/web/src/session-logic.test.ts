@@ -935,7 +935,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.toolTitle).toBe("Read File");
+    expect(entry?.toolTitle).toBe("Read");
     expect(entry?.detail).toBeUndefined();
   });
 
@@ -1031,7 +1031,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "read-complete",
-      toolTitle: "Read File",
+      toolTitle: "Read",
       detail: 'import * as Effect from "effect/Effect"',
       itemType: "dynamic_tool_call",
     });
@@ -1107,7 +1107,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
       id: "legacy-read-complete",
-      toolTitle: "Read File",
+      toolTitle: "Read",
       itemType: "dynamic_tool_call",
     });
     expect(entries[0]?.detail).toBeUndefined();
