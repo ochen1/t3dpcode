@@ -1,4 +1,11 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveX,
+  BellRingIcon,
+  LoaderIcon,
+  PlusIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -17,6 +24,10 @@ import { createModelSelection } from "@t3tools/shared/model";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+import {
+  requestBrowserNotificationPermission,
+  sendTestAgentBrowserNotification,
+} from "../../agentBrowserNotifications";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -409,6 +420,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
+      ...(settings.enableDesktopNotifications !==
+      DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications
+        ? ["Desktop notifications"]
+        : []),
       ...(Duration.toMillis(settings.automaticGitFetchInterval) !==
       Duration.toMillis(DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval)
         ? ["Automatic Git fetch interval"]
@@ -437,6 +452,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
       settings.automaticGitFetchInterval,
+      settings.enableDesktopNotifications,
       settings.enableAssistantStreaming,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
@@ -462,6 +478,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      enableDesktopNotifications: DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -483,6 +500,30 @@ export function GeneralSettingsPanel() {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const observability = useServerObservability();
+  const handleTestDesktopNotification = useCallback(() => {
+    void sendTestAgentBrowserNotification().then((permission) => {
+      if (permission === "denied") {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Notifications are blocked",
+            description: "Allow notifications in your browser settings, then try again.",
+          }),
+        );
+        return;
+      }
+
+      if (permission === null) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Notifications are unavailable",
+            description: "This browser does not support system notifications.",
+          }),
+        );
+      }
+    });
+  }, []);
   const serverProviders = useServerProviders();
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
@@ -676,6 +717,43 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Stream assistant messages"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Desktop notifications"
+          description="Show a system notification when an agent turn finishes."
+          resetAction={
+            settings.enableDesktopNotifications !==
+            DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications ? (
+              <SettingResetButton
+                label="desktop notifications"
+                onClick={() =>
+                  updateSettings({
+                    enableDesktopNotifications: DEFAULT_UNIFIED_SETTINGS.enableDesktopNotifications,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <>
+              <Button variant="outline" size="xs" onClick={handleTestDesktopNotification}>
+                <BellRingIcon />
+                Test
+              </Button>
+              <Switch
+                checked={settings.enableDesktopNotifications}
+                onCheckedChange={(checked) => {
+                  const enabled = Boolean(checked);
+                  updateSettings({ enableDesktopNotifications: enabled });
+                  if (enabled) {
+                    void requestBrowserNotificationPermission();
+                  }
+                }}
+                aria-label="Show desktop notifications"
+              />
+            </>
           }
         />
 

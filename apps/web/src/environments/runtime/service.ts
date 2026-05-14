@@ -69,6 +69,11 @@ import { WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
 import {
+  handleAgentBrowserNotificationDomainEvents,
+  handleAgentBrowserNotificationShellEvent,
+  handleAgentBrowserNotificationShellSnapshot,
+} from "../../agentBrowserNotifications";
+import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
 } from "../../logicalProject";
@@ -977,6 +982,12 @@ function applyRecoveredEventBatch(
   }
 
   useStore.getState().applyOrchestrationEvents(uiEvents, environmentId);
+  handleAgentBrowserNotificationDomainEvents(
+    events,
+    environmentId,
+    (threadId) =>
+      selectThreadByRef(useStore.getState(), scopeThreadRef(environmentId, threadId))?.title,
+  );
   if (needsProjectUiSync) {
     const projects = selectProjectsAcrossEnvironments(useStore.getState());
     const clientSettings = getClientSettings();
@@ -1052,6 +1063,7 @@ function applyShellEvent(event: OrchestrationShellStreamEvent, environmentId: En
 
   useStore.getState().applyShellEvent(event, environmentId);
   markAppliedProjectionEvent(environmentId, event.sequence);
+  handleAgentBrowserNotificationShellEvent(event, environmentId);
 
   switch (event.kind) {
     case "project-upserted":
@@ -1096,6 +1108,7 @@ function createEnvironmentConnectionHandlers() {
 
       useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
       markAppliedProjectionSnapshot(environmentId, snapshot);
+      handleAgentBrowserNotificationShellSnapshot(snapshot, environmentId);
       reconcileThreadDetailSubscriptionsForEnvironment(
         environmentId,
         snapshot.threads.map((thread) => thread.id),
