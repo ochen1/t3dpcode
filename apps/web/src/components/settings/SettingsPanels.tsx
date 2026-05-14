@@ -66,6 +66,7 @@ import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+import { ThemePackEditor } from "../ThemePackEditor";
 import {
   canOneClickUpdateProviderCandidate,
   collectProviderUpdateCandidates,
@@ -477,7 +478,7 @@ export function useSettingsRestore(onRestored?: () => void) {
 }
 
 export function GeneralSettingsPanel() {
-  const { theme, setTheme } = useTheme();
+  const { resolvedTheme, theme, setTheme } = useTheme();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const observability = useAtomValue(primaryServerObservabilityAtom);
@@ -548,6 +549,15 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        <div className="space-y-3">
+          {(resolvedTheme === "dark"
+            ? (["dark", "light"] as const)
+            : (["light", "dark"] as const)
+          ).map((variant) => (
+            <ThemePackEditor key={variant} variant={variant} />
+          ))}
+        </div>
 
         <SettingsRow
           title="Time format"
