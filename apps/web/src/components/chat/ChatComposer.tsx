@@ -509,7 +509,7 @@ export interface ChatComposerProps {
   scheduleStickToBottom: () => void;
 
   // Callbacks
-  onSend: (e?: { preventDefault: () => void }) => void;
+  onSend: (e?: { preventDefault: () => void; metaKey?: boolean; ctrlKey?: boolean }) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -1712,7 +1712,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const submitComposer = useCallback(
-    (event?: { preventDefault: () => void }) => {
+    (event?: { preventDefault: () => void; metaKey?: boolean; ctrlKey?: boolean }) => {
       onSend(event);
       if (shouldBlurMobileComposerOnSubmit()) {
         blurMobileComposerAfterSend();
@@ -1773,7 +1773,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
     }
     if (key === "Enter" && !event.shiftKey) {
-      submitComposer();
+      submitComposer(event);
       return true;
     }
     return false;

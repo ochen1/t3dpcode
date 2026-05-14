@@ -13,6 +13,7 @@ import {
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
+  type TurnDispatchMode,
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
@@ -999,6 +1000,7 @@ function ChatViewContent(props: ChatViewProps) {
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
+  const forkThread = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
@@ -3539,8 +3541,13 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const onSend = async (e?: {
+    preventDefault: () => void;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+  }) => {
     e?.preventDefault();
+    const dispatchMode: TurnDispatchMode = e?.metaKey || e?.ctrlKey ? "steer" : "queue";
     if (
       !activeThread ||
       isSendBusy ||
@@ -3609,6 +3616,68 @@ function ChatViewContent(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
+      return;
+    }
+    if (trimmed === "/fork" || trimmed === "/fork local") {
+      if (!activeProject || !isServerThread) {
+        setThreadError(activeThread.id, "Fork is available for saved project threads.");
+        return;
+      }
+      const createdAt = new Date().toISOString();
+      const forkedThreadId = newThreadId();
+      const importedMessages = activeThread.messages
+        .filter((message) => !message.streaming)
+        .map((message) => {
+          const importedMessage = {
+            messageId: newMessageId(),
+            role: message.role,
+            text: message.text,
+            createdAt: message.createdAt,
+            updatedAt: message.completedAt ?? message.createdAt,
+          };
+          if (!message.attachments || message.attachments.length === 0) {
+            return importedMessage;
+          }
+          return Object.assign(importedMessage, {
+            attachments: message.attachments.map((attachment) => ({
+              type: "image" as const,
+              id: attachment.id,
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+            })),
+          });
+        });
+      const forkResult = await forkThread({
+        environmentId,
+        input: {
+          threadId: forkedThreadId,
+          sourceThreadId: activeThread.id,
+          projectId: activeProject.id,
+          title: `${activeThread.title} fork`,
+          modelSelection: activeThread.modelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          importedMessages,
+          createdAt,
+        },
+      });
+      if (forkResult._tag === "Failure") {
+        setThreadError(activeThread.id, "Failed to fork thread.");
+        return;
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId,
+          threadId: forkedThreadId,
+        },
+      });
       return;
     }
     if (!hasSendableContent) {
@@ -3706,6 +3775,7 @@ function ChatViewContent(props: ChatViewProps) {
         text: outgoingMessageText,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
         turnId: null,
+        dispatchMode,
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
         streaming: false,
@@ -3837,6 +3907,7 @@ function ChatViewContent(props: ChatViewProps) {
           runtimeMode,
           interactionMode,
           ...(bootstrap ? { bootstrap } : {}),
+          dispatchMode,
           createdAt: messageCreatedAt,
         },
       });

@@ -83,6 +83,14 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
       }),
   );
 
+  public readonly steerTurnImpl = vi.fn(
+    (_input: CodexSessionRuntimeSendTurnInput): Promise<ProviderTurnStartResult> =>
+      Promise.resolve({
+        threadId: this.options.threadId,
+        turnId: asTurnId("turn-1"),
+      }),
+  );
+
   public readonly interruptTurnImpl = vi.fn(
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
   );
@@ -99,6 +107,14 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     (_numTurns: number): Promise<CodexThreadSnapshot> =>
       Promise.resolve({
         threadId: "provider-thread-1",
+        turns: [],
+      }),
+  );
+
+  public readonly forkThreadImpl = vi.fn(
+    (): Promise<CodexThreadSnapshot> =>
+      Promise.resolve({
+        threadId: "provider-thread-fork",
         turns: [],
       }),
   );
@@ -131,6 +147,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.sendTurnImpl(input));
   }
 
+  steerTurn(input: CodexSessionRuntimeSendTurnInput) {
+    return Effect.promise(() => this.steerTurnImpl(input));
+  }
+
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
   }
@@ -140,6 +160,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   rollbackThread(numTurns: number) {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
   }
+
+  forkThread = Effect.promise(() => this.forkThreadImpl());
 
   respondToRequest(requestId: ApprovalRequestId, decision: ProviderApprovalDecision) {
     return Effect.promise(() => this.respondToRequestImpl(requestId, decision));

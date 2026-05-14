@@ -304,6 +304,7 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            forkSourceThreadId: payload.forkSourceThreadId,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -422,6 +423,7 @@ export function projectEvent(
             role: payload.role,
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
+            ...(payload.dispatchMode !== undefined ? { dispatchMode: payload.dispatchMode } : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
             createdAt: payload.createdAt,
@@ -445,6 +447,9 @@ export function projectEvent(
                     streaming: message.streaming,
                     updatedAt: message.updatedAt,
                     turnId: message.turnId,
+                    ...(message.dispatchMode !== undefined
+                      ? { dispatchMode: message.dispatchMode }
+                      : {}),
                     ...(message.attachments !== undefined
                       ? { attachments: message.attachments }
                       : {}),
