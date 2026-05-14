@@ -49,6 +49,7 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderCompactThreadInput, ProviderOperationError } from "./provider.ts";
 import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
@@ -154,6 +155,9 @@ export const WS_METHODS = {
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
   sourceControlPublishRepository: "sourceControl.publishRepository",
+
+  // Provider methods
+  providerCompactThread: "provider.compactThread",
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
@@ -263,6 +267,12 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
     error: SourceControlRepositoryError,
   },
 );
+
+export const WsProviderCompactThreadRpc = Rpc.make(WS_METHODS.providerCompactThread, {
+  payload: ProviderCompactThreadInput,
+  success: Schema.Void,
+  error: ProviderOperationError,
+});
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
   payload: ProjectSearchEntriesInput,
@@ -488,6 +498,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
+  WsProviderCompactThreadRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,

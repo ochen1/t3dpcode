@@ -28,6 +28,7 @@ import {
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
+  ProviderOperationError,
   ThreadId,
   type TerminalEvent,
   WS_METHODS,
@@ -50,6 +51,7 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
@@ -952,6 +954,23 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             {
               "rpc.aggregate": "source-control",
             },
+          ),
+        [WS_METHODS.providerCompactThread]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.providerCompactThread,
+            Effect.gen(function* () {
+              const providerService = yield* ProviderService;
+              return yield* providerService.compactThread(input);
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderOperationError({
+                    message: cause.message,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.projectsSearchEntries]: (input) =>
           observeRpcEffect(

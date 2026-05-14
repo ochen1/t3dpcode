@@ -26,6 +26,7 @@ import type {
   ProjectWriteFileResult,
 } from "./project.ts";
 import type { ProviderInstanceId } from "./providerInstance.ts";
+import type { ProviderCompactThreadInput } from "./provider.ts";
 import type {
   ServerConfig,
   ServerProcessDiagnosticsResult,
@@ -543,6 +544,9 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
+  };
+  provider: {
+    compactThread: (input: ProviderCompactThreadInput) => Promise<void>;
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;

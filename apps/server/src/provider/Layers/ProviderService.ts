@@ -13,6 +13,7 @@ import {
   ModelSelection,
   NonNegativeInt,
   ThreadId,
+  ProviderCompactThreadInput,
   ProviderForkThreadInput,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
@@ -1073,6 +1074,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const compactThread: ProviderServiceShape["compactThread"] = Effect.fn("compactThread")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.compactThread",
+        schema: ProviderCompactThreadInput,
+        payload: rawInput,
+      });
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.compactThread",
+        allowRecovery: true,
+      });
+      if (!routed.adapter.compactThread) {
+        return yield* toValidationError(
+          "ProviderService.compactThread",
+          `Context compaction is unavailable for provider '${routed.adapter.provider}'.`,
+        );
+      }
+      yield* routed.adapter.compactThread(routed.threadId);
+      yield* analytics.record("provider.thread.compacted", {
+        provider: routed.adapter.provider,
+      });
+    },
+  );
+
   const runStopAll = Effect.fn("runStopAll")(function* () {
     const threadIds = yield* directory.listThreadIds();
     const currentAdapters = yield* getAdapterEntries;
@@ -1142,6 +1168,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getInstanceInfo,
     rollbackConversation,
     forkThread,
+    compactThread,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

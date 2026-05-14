@@ -2629,6 +2629,36 @@ export default function ChatView(props: ChatViewProps) {
     [removeQueuedComposerTurn, restoreQueuedTurnToComposer],
   );
 
+  const compactProviderThread = useCallback(async (): Promise<boolean> => {
+    const api = readEnvironmentApi(environmentId);
+    if (
+      !api ||
+      !activeThread ||
+      !isServerThread ||
+      !activeThread.session ||
+      activeThread.session.status === "closed" ||
+      activeThread.session.provider !== ProviderDriverKind.make("codex")
+    ) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Compact is unavailable",
+          description: "Open an active Codex server thread before compacting context.",
+        }),
+      );
+      return false;
+    }
+
+    try {
+      await api.provider.compactThread({ threadId: activeThread.id });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to compact thread.";
+      setThreadError(activeThread.id, message);
+      return false;
+    }
+  }, [activeThread, environmentId, isServerThread, setThreadError]);
+
   const onSend = async (
     e?: {
       preventDefault: () => void;
@@ -2728,7 +2758,14 @@ export default function ChatView(props: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
+      if (standaloneSlashCommand === "compact") {
+        const compacted = await compactProviderThread();
+        if (!compacted) {
+          return false;
+        }
+      } else {
+        handleInteractionModeChange(standaloneSlashCommand);
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -4001,6 +4038,7 @@ export default function ChatView(props: ChatViewProps) {
                     onChangeActivePendingUserInputCustomAnswer
                   }
                   onProviderModelSelect={onProviderModelSelect}
+                  onCompactThread={compactProviderThread}
                   toggleInteractionMode={toggleInteractionMode}
                   handleRuntimeModeChange={handleRuntimeModeChange}
                   handleInteractionModeChange={handleInteractionModeChange}
