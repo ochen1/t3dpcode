@@ -23,6 +23,8 @@ import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
@@ -1119,6 +1121,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
+  const [outputExpanded, setOutputExpanded] = useState(false);
   const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
@@ -1133,6 +1136,8 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
   const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
+  const outputSections = workEntry.outputSections ?? [];
+  const hasOutput = outputSections.length > 0;
 
   return (
     <div className="rounded-lg px-1 py-1">
@@ -1209,6 +1214,22 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
             </Tooltip>
           )}
         </div>
+        {hasOutput ? (
+          <button
+            type="button"
+            aria-expanded={outputExpanded}
+            className="flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[10px] leading-none text-muted-foreground/55 transition-colors hover:bg-muted/50 hover:text-foreground/75"
+            onClick={() => setOutputExpanded((value) => !value)}
+            title={outputExpanded ? "Hide output" : "Show output"}
+          >
+            <span>Output</span>
+            {outputExpanded ? (
+              <ChevronUpIcon className="size-3" aria-hidden="true" />
+            ) : (
+              <ChevronDownIcon className="size-3" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
       </div>
       {hasChangedFiles && !previewIsChangedFiles && (
         <div className="mt-1 flex flex-wrap gap-1 pl-6">
@@ -1231,6 +1252,46 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           )}
         </div>
       )}
+      {hasOutput && outputExpanded ? <WorkEntryOutputPanel sections={outputSections} /> : null}
     </div>
   );
 });
+
+function WorkEntryOutputPanel({
+  sections,
+}: {
+  sections: NonNullable<TimelineWorkEntry["outputSections"]>;
+}) {
+  return (
+    <div className="mt-1.5 ml-7 overflow-hidden rounded-md border border-border/45 bg-background/80">
+      {sections.map((section) => (
+        <div
+          key={`${section.label}:${section.tone ?? "output"}`}
+          className={cn(section !== sections[0] && "border-t border-border/35")}
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-border/25 bg-muted/25 px-2 py-1">
+            <span
+              className={cn(
+                "font-mono text-[10px] uppercase tracking-[0.08em]",
+                outputSectionLabelClass(section.tone),
+              )}
+            >
+              {section.label}
+            </span>
+          </div>
+          <pre className="max-h-72 overflow-auto px-2 py-1.5 font-mono text-[11px] leading-4 whitespace-pre-wrap text-foreground/78">
+            {section.text}
+          </pre>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function outputSectionLabelClass(
+  tone: NonNullable<TimelineWorkEntry["outputSections"]>[number]["tone"],
+) {
+  if (tone === "stderr") return "text-rose-300/70 dark:text-rose-300/70";
+  if (tone === "stdout") return "text-emerald-300/70 dark:text-emerald-300/70";
+  return "text-muted-foreground/65";
+}
