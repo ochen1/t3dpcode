@@ -997,11 +997,23 @@ function mapToRuntimeEvents(
     if (!payload) {
       return [];
     }
+    const rawPayload =
+      event.payload && typeof event.payload === "object"
+        ? (event.payload as Record<string, unknown>)
+        : null;
+    const toolName = trimText(
+      typeof rawPayload?.toolName === "string" ? rawPayload.toolName : undefined,
+    );
+    const toolUseId = trimText(
+      typeof rawPayload?.toolUseId === "string" ? rawPayload.toolUseId : undefined,
+    );
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
         type: "tool.progress",
         payload: {
+          ...(toolUseId ? { toolUseId } : {}),
+          ...(toolName ? { toolName } : {}),
           summary: payload.message,
         },
       },
