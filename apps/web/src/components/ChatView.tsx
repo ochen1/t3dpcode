@@ -1011,6 +1011,9 @@ function ChatViewContent(props: ChatViewProps) {
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
+  const compactThread = useAtomCommand(serverEnvironment.compactThread, {
+    reportFailure: false,
+  });
   const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
@@ -3564,6 +3567,41 @@ function ChatViewContent(props: ChatViewProps) {
     [removeQueuedComposerTurn, restoreQueuedTurnToComposer],
   );
 
+  const compactProviderThread = useCallback(async (): Promise<boolean> => {
+    if (
+      !activeThread ||
+      !isServerThread ||
+      !activeThread.session ||
+      activeThread.session.status === "closed" ||
+      activeThread.session.provider !== ProviderDriverKind.make("codex")
+    ) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Compact is unavailable",
+          description: "Open an active Codex server thread before compacting context.",
+        }),
+      );
+      return false;
+    }
+
+    const result = await compactThread({
+      environmentId,
+      input: { threadId: activeThread.id },
+    });
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          error instanceof Error ? error.message : "Failed to compact thread.",
+        );
+      }
+      return false;
+    }
+    return true;
+  }, [activeThread, compactThread, environmentId, isServerThread, setThreadError]);
+
   const onSend = async (
     e?: {
       preventDefault: () => void;
@@ -3672,7 +3710,14 @@ function ChatViewContent(props: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
+      if (standaloneSlashCommand === "compact") {
+        const compacted = await compactProviderThread();
+        if (!compacted) {
+          return false;
+        }
+      } else {
+        handleInteractionModeChange(standaloneSlashCommand);
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -5180,6 +5225,7 @@ function ChatViewContent(props: ChatViewProps) {
                     }
                     onProviderModelSelect={onProviderModelSelect}
                     getModelDisabledReason={getModelDisabledReason}
+                    onCompactThread={compactProviderThread}
                     toggleInteractionMode={toggleInteractionMode}
                     handleRuntimeModeChange={handleRuntimeModeChange}
                     handleInteractionModeChange={handleInteractionModeChange}

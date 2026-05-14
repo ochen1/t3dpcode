@@ -299,6 +299,7 @@ describe("ProviderCommandReactor", () => {
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       steerTurn: unsupported as ProviderServiceShape["steerTurn"],
       forkThread: unsupported as ProviderServiceShape["forkThread"],
+      compactThread: unsupported as ProviderServiceShape["compactThread"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],

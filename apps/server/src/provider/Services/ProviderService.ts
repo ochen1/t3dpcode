@@ -12,6 +12,7 @@
  * @module ProviderService
  */
 import type {
+  ProviderCompactThreadInput,
   ProviderInterruptTurnInput,
   ProviderForkThreadInput,
   ProviderForkThreadResult,
@@ -120,6 +121,13 @@ export interface ProviderServiceShape {
   readonly forkThread: (
     input: ProviderForkThreadInput,
   ) => Effect.Effect<ProviderForkThreadResult, ProviderServiceError>;
+
+  /**
+   * Trigger provider-native context compaction for a thread.
+   */
+  readonly compactThread: (
+    input: ProviderCompactThreadInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * Canonical provider runtime event stream.

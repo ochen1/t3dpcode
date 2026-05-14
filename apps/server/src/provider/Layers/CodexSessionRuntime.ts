@@ -152,6 +152,7 @@ export interface CodexSessionRuntimeShape {
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly forkThread: Effect.Effect<CodexThreadForkResult, CodexSessionRuntimeError>;
+  readonly compactThread: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -1408,6 +1409,25 @@ export const makeCodexSessionRuntime = (
           threadId: providerThreadId,
         });
         return parseThreadSnapshot(response);
+      }),
+      compactThread: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        yield* updateSession(sessionRef, {
+          status: "running",
+        });
+        yield* emitEvent({
+          kind: "notification",
+          threadId: options.threadId,
+          method: "thread/compacting",
+          message: "Compacting context",
+          payload: {
+            threadId: providerThreadId,
+            state: "compacting",
+          },
+        });
+        yield* client.request("thread/compact/start", {
+          threadId: providerThreadId,
+        });
       }),
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {
