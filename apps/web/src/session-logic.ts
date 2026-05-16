@@ -535,7 +535,8 @@ function isUninformativeCommandStartActivity(activity: OrchestrationThreadActivi
     return false;
   }
   const commandPreview = extractToolCommand(payload);
-  return !commandPreview.command;
+  const detail = asTrimmedString(payload?.detail);
+  return !commandPreview.command && (!detail || detail === "{}");
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
@@ -744,11 +745,14 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
   if (entry.toolCallId) {
     return `tool:${entry.toolCallId}`;
   }
+  const command = normalizeCompactToolLabel(entry.command ?? "");
+  if (entry.itemType === "command_execution" && command.length > 0) {
+    return `command:${command}`;
+  }
   const normalizedLabel = normalizeCompactToolLabel(entry.toolTitle ?? entry.label);
   const itemType = entry.itemType ?? "";
   const requestKind = entry.requestKind ?? "";
   const toolName = entry.toolName ?? "";
-  const command = normalizeCompactToolLabel(entry.command ?? "");
   const detailHint = normalizeCompactToolLabel(extractDetailCollapseHint(entry.detail));
   if (
     normalizedLabel.length === 0 &&
@@ -973,14 +977,32 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
+  const dataInput = asRecord(data?.input);
+  const rawInput = asRecord(data?.rawInput);
   const itemType = asTrimmedString(payload?.itemType);
   const detail = asTrimmedString(payload?.detail);
+  const detailCommand = detail && detail !== "{}" ? stripTrailingExitCode(detail).output : null;
+  const rawInputExecutable = asTrimmedString(rawInput?.executable);
+  const rawInputArgs = formatCommandValue(rawInput?.args);
+  const rawInputExecutableCommand =
+    rawInputExecutable && rawInputArgs
+      ? `${rawInputExecutable} ${rawInputArgs}`
+      : (rawInputExecutable ?? null);
   const candidates: unknown[] = [
     item?.command,
+    item?.cmd,
     itemInput?.command,
+    itemInput?.cmd,
     itemResult?.command,
+    itemResult?.cmd,
     data?.command,
-    itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
+    data?.cmd,
+    dataInput?.command,
+    dataInput?.cmd,
+    rawInput?.command,
+    rawInput?.cmd,
+    rawInputExecutableCommand,
+    itemType === "command_execution" ? detailCommand : null,
   ];
 
   for (const candidate of candidates) {
@@ -1058,8 +1080,7 @@ function summarizeToolTextOutput(value: string): string | null {
 }
 
 function summarizeToolRawOutput(payload: Record<string, unknown> | null): string | null {
-  const data = asRecord(payload?.data);
-  const rawOutput = asRecord(data?.rawOutput);
+  const rawOutput = extractRawOutputRecord(payload);
   if (!rawOutput) {
     return null;
   }
@@ -1086,8 +1107,7 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
 function extractToolOutputSections(
   payload: Record<string, unknown> | null,
 ): ReadonlyArray<WorkLogOutputSection> {
-  const data = asRecord(payload?.data);
-  const rawOutput = asRecord(data?.rawOutput);
+  const rawOutput = extractRawOutputRecord(payload);
   if (!rawOutput) {
     return [];
   }
@@ -1096,6 +1116,7 @@ function extractToolOutputSections(
   pushOutputSection(sections, "stdout", rawOutput.stdout, "stdout");
   pushOutputSection(sections, "stderr", rawOutput.stderr, "stderr");
   pushOutputSection(sections, "content", rawOutput.content, "content");
+  pushOutputSection(sections, "output", rawOutput.output, "content");
 
   const exitCode = asNumber(rawOutput.exitCode);
   if (exitCode !== null && sections.length > 0) {
@@ -1112,6 +1133,41 @@ function extractToolOutputSections(
 
   const json = formatJsonOutput(rawOutput);
   return json ? [{ label: "raw output", text: json, tone: "json" }] : [];
+}
+
+function extractRawOutputRecord(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const directRawOutput = asRecord(data?.rawOutput) ?? asRecord(item?.rawOutput);
+  if (directRawOutput) {
+    return directRawOutput;
+  }
+  if (isOutputLikeRecord(itemResult)) {
+    return itemResult;
+  }
+  if (isOutputLikeRecord(data)) {
+    return data;
+  }
+  return null;
+}
+
+function isOutputLikeRecord(
+  value: Record<string, unknown> | null,
+): value is Record<string, unknown> {
+  if (!value) {
+    return false;
+  }
+  return (
+    asTrimmedString(value.stdout) !== null ||
+    asTrimmedString(value.stderr) !== null ||
+    asTrimmedString(value.content) !== null ||
+    asTrimmedString(value.output) !== null ||
+    asNumber(value.exitCode) !== null ||
+    asNumber(value.totalFiles) !== null
+  );
 }
 
 function pushOutputSection(

@@ -1208,6 +1208,71 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("collapses Bash cmd lifecycle rows and exposes nested command output", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "bash-started-empty",
+        createdAt: "2026-04-16T22:40:40.221Z",
+        kind: "tool.started",
+        summary: "Bash started",
+        payload: {
+          itemType: "command_execution",
+          title: "Bash",
+          detail: "{}",
+        },
+      }),
+      makeActivity({
+        id: "bash-updated",
+        createdAt: "2026-04-16T22:40:41.221Z",
+        kind: "tool.updated",
+        summary: "Bash",
+        payload: {
+          itemType: "command_execution",
+          title: "Bash",
+          detail: "Bash: ls",
+          data: {
+            rawInput: {
+              cmd: "ls",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "bash-completed",
+        createdAt: "2026-04-16T22:40:42.221Z",
+        kind: "tool.completed",
+        summary: "Bash",
+        payload: {
+          itemType: "command_execution",
+          title: "Bash",
+          detail: "Bash: ls",
+          data: {
+            item: {
+              result: {
+                output: "apps\npackages\n",
+                exitCode: 0,
+              },
+            },
+            rawInput: {
+              cmd: "ls",
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "bash-completed",
+      command: "ls",
+      outputSections: [
+        { label: "output", text: "apps\npackages", tone: "content" },
+        { label: "exit", text: "exit code 0", tone: "stdout" },
+      ],
+    });
+  });
+
   it("collapses legacy completed tool rows that are missing tool metadata", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
