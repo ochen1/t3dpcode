@@ -74,6 +74,7 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseCommand?: string;
   collapseKey?: string;
+  turnId?: TurnId;
   toolCallId?: string;
   toolName?: string;
 }
@@ -493,16 +494,10 @@ export function hasActionableProposedPlan(
 
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
+  _latestTurnId?: TurnId | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries = ordered
-    .filter((activity) =>
-      latestTurnId
-        ? activity.turnId === latestTurnId ||
-          (activity.kind === "context-compaction" && activity.turnId === null)
-        : true,
-    )
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.kind !== "account.rate-limits.updated")
     .filter(
@@ -518,6 +513,7 @@ export function deriveWorkLogEntries(
       activityKind: _activityKind,
       collapseCommand: _collapseCommand,
       collapseKey: _collapseKey,
+      turnId: _turnId,
       ...entry
     }) => entry,
   );
@@ -594,6 +590,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
           ? "info"
           : activity.tone,
     activityKind: activity.kind,
+    ...(activity.turnId ? { turnId: activity.turnId } : {}),
     ...(toolName ? { toolName } : {}),
   };
   const itemType = extractWorkLogItemType(payload);
@@ -668,6 +665,9 @@ function shouldCollapseToolLifecycleEntries(
     return false;
   }
   if (!isRenderableToolLifecycleActivity(next.activityKind)) {
+    return false;
+  }
+  if (previous.turnId !== next.turnId) {
     return false;
   }
   if (previous.activityKind === "tool.completed") {

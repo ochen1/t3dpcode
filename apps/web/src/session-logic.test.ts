@@ -679,7 +679,7 @@ describe("deriveWorkLogEntries", () => {
     expect(entries[0]?.tone).toBe("thinking");
   });
 
-  it("filters by turn id when provided", () => {
+  it("keeps older turn tool activity when a latest turn id is provided", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({ id: "turn-1", turnId: "turn-1", summary: "Tool call", kind: "tool.started" }),
       makeActivity({
@@ -692,7 +692,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
-    expect(entries.map((entry) => entry.id)).toEqual(["turn-2"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["turn-1", "turn-2"]);
   });
 
   it("omits checkpoint captured info entries", () => {
@@ -1587,7 +1587,7 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries[0]?.label).toBe("Context compacted");
   });
 
-  it("keeps null-turn context compaction entries while filtering to latest turn", () => {
+  it("keeps old turn tool activity alongside null-turn context compaction entries", () => {
     const entries = deriveWorkLogEntries(
       [
         makeActivity({
@@ -1607,7 +1607,7 @@ describe("deriveWorkLogEntries context window handling", () => {
       TurnId.make("turn-2"),
     );
 
-    expect(entries.map((entry) => entry.id)).toEqual(["compaction-1"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["compaction-1", "older-tool"]);
   });
 });
 
