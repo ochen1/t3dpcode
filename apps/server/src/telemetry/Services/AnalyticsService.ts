@@ -1,8 +1,8 @@
 /**
- * AnalyticsService - Anonymous telemetry capture contract.
+ * AnalyticsService - Disabled analytics contract.
  *
- * Provides a best-effort event API for runtime telemetry and a strict
- * `captureImmediate` method for call sites that need explicit error handling.
+ * Provides a no-op event API so existing call sites can remain simple without
+ * sending telemetry or allocating background flush work.
  *
  * @module AnalyticsService
  */
@@ -12,7 +12,7 @@ import * as Context from "effect/Context";
 
 export interface AnalyticsServiceShape {
   /**
-   * Capture an event immediately; returns typed failure when capture fails.
+   * Ignore an analytics event.
    */
   readonly record: (
     event: string,
@@ -20,7 +20,7 @@ export interface AnalyticsServiceShape {
   ) => Effect.Effect<void, never>;
 
   /**
-   * Flush queued telemetry.
+   * No-op flush retained for call sites that coordinate shutdown.
    */
   readonly flush: Effect.Effect<void, never>;
 }
