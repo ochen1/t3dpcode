@@ -815,7 +815,7 @@ describe("deriveWorkLogEntries", () => {
       }),
     ];
 
-    const entries = deriveWorkLogEntries(activities);
+    const entries = deriveWorkLogEntries(activities, TurnId.make("turn-2"));
     expect(entries.map((entry) => entry.id)).toEqual(["turn-1-tool", "turn-2-tool"]);
     expect(entries.map((entry) => entry.turnId)).toEqual([
       TurnId.make("turn-1"),
@@ -1778,7 +1778,7 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries[0]?.label).toBe("Context compacted");
   });
 
-  it("keeps null-turn context compaction entries while filtering to latest turn", () => {
+  it("keeps old turn tool activity alongside null-turn context compaction entries", () => {
     const entries = deriveWorkLogEntries(
       [
         makeActivity({
@@ -1798,7 +1798,7 @@ describe("deriveWorkLogEntries context window handling", () => {
       TurnId.make("turn-2"),
     );
 
-    expect(entries.map((entry) => entry.id)).toEqual(["compaction-1"]);
+    expect(entries.map((entry) => entry.id)).toEqual(["compaction-1", "older-tool"]);
   });
 });
 
