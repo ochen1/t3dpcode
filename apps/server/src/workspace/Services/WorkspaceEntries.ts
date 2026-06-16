@@ -13,6 +13,8 @@ import type * as Effect from "effect/Effect";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectListEntriesInput,
+  ProjectListEntriesResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
 } from "@t3tools/contracts";
@@ -23,7 +25,7 @@ export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntr
     cwd: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
@@ -34,7 +36,7 @@ export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<Workspa
     partialPath: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
@@ -49,6 +51,13 @@ export interface WorkspaceEntriesShape {
   readonly browse: (
     input: FilesystemBrowseInput,
   ) => Effect.Effect<FilesystemBrowseResult, WorkspaceEntriesBrowseError>;
+
+  /**
+   * List the cached workspace index for a project root.
+   */
+  readonly list: (
+    input: ProjectListEntriesInput,
+  ) => Effect.Effect<ProjectListEntriesResult, WorkspaceEntriesError>;
 
   /**
    * Search indexed workspace entries for files and directories matching the

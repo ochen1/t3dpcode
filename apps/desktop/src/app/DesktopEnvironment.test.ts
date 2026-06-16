@@ -59,6 +59,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.savedEnvironmentRegistryPath, "/tmp/t3/dev/saved-environments.json");
       assert.equal(environment.serverSettingsPath, "/tmp/t3/dev/settings.json");
       assert.equal(environment.logDir, "/tmp/t3/dev/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/t3/dev/browser-artifacts");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
@@ -89,7 +90,22 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.isDevelopment, false);
       assert.equal(environment.stateDir, "/tmp/t3/userdata");
       assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
       assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+    }),
+  );
+
+  it.effect("uses a configured app user model id override", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        {},
+        {
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.t3tools.t3code.dev.local ",
+          VITE_DEV_SERVER_URL: "http://localhost:5173",
+        },
+      );
+
+      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev.local");
     }),
   );
 

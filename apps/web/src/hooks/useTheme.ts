@@ -247,7 +247,7 @@ function syncDesktopTheme(theme: ThemeMode) {
   }
 
   const bridge = window.desktopBridge;
-  if (!bridge || lastDesktopTheme === theme) {
+  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === theme) {
     return;
   }
 

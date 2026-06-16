@@ -10,6 +10,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 
 import { ServerConfig } from "../../config.ts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
@@ -75,13 +76,44 @@ const searchWorkspaceEntries = (input: { cwd: string; query: string; limit: numb
   });
 
 const appendSeparator = (input: string) =>
-  input.endsWith("/") || input.endsWith("\\")
-    ? input
-    : `${input}${process.platform === "win32" ? "\\" : "/"}`;
+  Effect.map(HostProcessPlatform, (platform) =>
+    input.endsWith("/") || input.endsWith("\\")
+      ? input
+      : `${input}${platform === "win32" ? "\\" : "/"}`,
+  );
 
 it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("list", () => {
+    it.effect("returns the complete cached workspace index", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        yield* writeTextFile(cwd, "src/components/Composer.tsx");
+        yield* writeTextFile(cwd, "README.md");
+        yield* writeTextFile(cwd, "node_modules/pkg/index.js");
+
+        const workspaceEntries = yield* WorkspaceEntries;
+        const result = yield* workspaceEntries.list({ cwd });
+
+        expect(result.entries).toEqual(
+          expect.arrayContaining([
+            { path: "src", kind: "directory" },
+            { path: "src/components", kind: "directory", parentPath: "src" },
+            {
+              path: "src/components/Composer.tsx",
+              kind: "file",
+              parentPath: "src/components",
+            },
+            { path: "README.md", kind: "file" },
+          ]),
+        );
+        expect(result.entries.some((entry) => entry.path.startsWith("node_modules"))).toBe(false);
+        expect(result.truncated).toBe(false);
+      }),
+    );
   });
 
   describe("search", () => {
@@ -344,12 +376,13 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-hidden-" });
         yield* writeTextFile(cwd, ".config/settings.json", "{}");
         yield* writeTextFile(cwd, "config/settings.json", "{}");
+        const cwdWithSeparator = yield* appendSeparator(cwd);
 
         const directoryResult = yield* workspaceEntries.browse({
-          partialPath: appendSeparator(cwd),
+          partialPath: cwdWithSeparator,
         });
         const hiddenPrefixResult = yield* workspaceEntries.browse({
-          partialPath: `${appendSeparator(cwd)}.c`,
+          partialPath: `${cwdWithSeparator}.c`,
         });
 
         expect(directoryResult.entries.map((entry) => entry.name)).toEqual([".config", "config"]);
@@ -390,6 +423,21 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
           .pipe(Effect.flip);
 
         expect(error.detail).toBe("Relative filesystem browse paths require a current project.");
+      }),
+    );
+
+    it.effect("returns an empty listing when the OS denies directory access", () =>
+      Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries;
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-eacces-" });
+
+        const denied = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+        vi.spyOn(fsPromises, "readdir").mockRejectedValueOnce(denied);
+
+        const result = yield* workspaceEntries.browse({
+          partialPath: yield* appendSeparator(cwd),
+        });
+        expect(result).toEqual({ parentPath: cwd, entries: [] });
       }),
     );
   });

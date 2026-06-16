@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as OS from "node:os";
+import * as NodeOS from "node:os";
 import fsPromises from "node:fs/promises";
 import type { Dirent } from "node:fs";
 
@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -39,6 +40,7 @@ const IGNORED_DIRECTORY_NAMES = new Set([
   "node_modules",
   ".next",
   ".turbo",
+  ".vite-plus",
   "dist",
   "build",
   "out",
@@ -64,10 +66,10 @@ function toPosixPath(input: string): string {
 
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
-    return OS.homedir();
+    return NodeOS.homedir();
   }
   if (input.startsWith("~/") || input.startsWith("~\\")) {
-    return path.join(OS.homedir(), input.slice(2));
+    return path.join(NodeOS.homedir(), input.slice(2));
   }
   return input;
 }
@@ -154,7 +156,8 @@ const resolveBrowseTarget = (
   pathService: Path.Path,
 ): Effect.Effect<string, WorkspaceEntriesBrowseError> =>
   Effect.gen(function* () {
-    if (process.platform !== "win32" && isWindowsAbsolutePath(input.partialPath)) {
+    const platform = yield* HostProcessPlatform;
+    if (platform !== "win32" && isWindowsAbsolutePath(input.partialPath)) {
       return yield* new WorkspaceEntriesBrowseError({
         cwd: input.cwd,
         partialPath: input.partialPath,
@@ -187,7 +190,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const isInsideVcsWorkTree = (cwd: string): Effect.Effect<boolean> =>
     vcsRegistry.detect({ cwd }).pipe(
       Effect.map((handle) => handle !== null),
-      Effect.catch(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
 
   const filterVcsIgnoredPaths = (
@@ -199,23 +202,23 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
         handle
           ? handle.driver.filterIgnoredPaths(cwd, relativePaths).pipe(
               Effect.map((paths) => [...paths]),
-              Effect.catch(() => Effect.succeed(relativePaths)),
+              Effect.orElseSucceed(() => relativePaths),
             )
           : Effect.succeed(relativePaths),
       ),
-      Effect.catch(() => Effect.succeed(relativePaths)),
+      Effect.orElseSucceed(() => relativePaths),
     );
 
   const buildWorkspaceIndexFromVcs = Effect.fn("WorkspaceEntries.buildWorkspaceIndexFromVcs")(
     function* (cwd: string) {
-      const vcs = yield* vcsRegistry.detect({ cwd }).pipe(Effect.catch(() => Effect.succeed(null)));
+      const vcs = yield* vcsRegistry.detect({ cwd }).pipe(Effect.orElseSucceed(() => null));
       if (!vcs) {
         return null;
       }
 
       const listedFiles = yield* vcs.driver
         .listWorkspaceFiles(cwd)
-        .pipe(Effect.catch(() => Effect.succeed(null)));
+        .pipe(Effect.orElseSucceed(() => null));
 
       if (!listedFiles) {
         return null;
@@ -430,7 +433,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   const invalidate: WorkspaceEntriesShape["invalidate"] = Effect.fn("WorkspaceEntries.invalidate")(
     function* (cwd) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(cwd).pipe(
-        Effect.catch(() => Effect.succeed(cwd)),
+        Effect.orElseSucceed(() => cwd),
       );
       yield* Cache.invalidate(workspaceIndexCache, cwd);
       if (normalizedCwd !== cwd) {
@@ -456,7 +459,18 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
             detail: `Unable to browse '${parentPath}': ${cause instanceof Error ? cause.message : String(cause)}`,
             cause,
           }),
-      });
+      }).pipe(
+        // The user can deny macOS TCC prompts for the target dir (Documents,
+        // Downloads, Music, etc.); surface an empty listing instead of an
+        // error so the caller doesn't retry-loop the prompt.
+        Effect.catchIf(
+          (error) => {
+            const code = (error.cause as NodeJS.ErrnoException | undefined)?.code;
+            return code === "EACCES" || code === "EPERM";
+          },
+          () => Effect.succeed<Dirent[]>([]),
+        ),
+      );
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
@@ -516,9 +530,24 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const list: WorkspaceEntriesShape["list"] = Effect.fn("WorkspaceEntries.list")(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    return yield* Cache.get(workspaceIndexCache, normalizedCwd).pipe(
+      Effect.map((index) => ({
+        entries: index.entries.map(({ path: entryPath, kind, parentPath }) => ({
+          path: entryPath,
+          kind,
+          ...(parentPath ? { parentPath } : {}),
+        })),
+        truncated: index.truncated,
+      })),
+    );
+  });
+
   return {
     browse,
     invalidate,
+    list,
     search,
   } satisfies WorkspaceEntriesShape;
 });
