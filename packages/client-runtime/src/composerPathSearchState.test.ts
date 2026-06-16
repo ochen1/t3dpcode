@@ -1,4 +1,4 @@
-import { assert, beforeEach, it, vi } from "vite-plus/test";
+import { assert, beforeEach, it, vi } from "vitest";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 

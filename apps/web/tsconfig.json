@@ -8,6 +8,7 @@
     "verbatimModuleSyntax": false,
     "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
     "paths": {
       "~/*": ["./src/*"]
     },
@@ -25,5 +26,5 @@
       }
     ]
   },
-  "include": ["src", "vite.config.ts", "vercel.ts", "test", "../../scripts/lib/public-config.ts"]
+  "include": ["src", "vite.config.ts", "vercel.ts", "test"]
 }

@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as Electron from "electron";
-import { beforeEach, vi } from "vite-plus/test";
+import { beforeEach, vi } from "vitest";
 
 const { buildFromTemplateMock, createFromNamedImageMock, setApplicationMenuMock } = vi.hoisted(
   () => ({

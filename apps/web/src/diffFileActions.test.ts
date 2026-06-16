@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { openDiffFilePrimaryAction } from "./diffFileActions";
 import { selectThreadRightPanelState, useRightPanelStore } from "./rightPanelStore";

@@ -162,7 +162,7 @@
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",
-    "test": "vp test run"
+    "test": "vitest run"
   },
   "dependencies": {
     "@noble/curves": "catalog:",
@@ -176,6 +176,6 @@
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@types/node": "catalog:",
-    "vite-plus": "catalog:"
+    "vitest": "catalog:"
   }
 }

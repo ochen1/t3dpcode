@@ -1001,7 +1001,7 @@ const make = Effect.gen(function* () {
       }
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.dispatch-queued",
-        commandId: serverCommandId("dispatch-queued-turn"),
+        commandId: yield* serverCommandId("dispatch-queued-turn"),
         threadId,
         messageId: nextQueuedTurn.messageId,
         ...(nextQueuedTurn.modelSelection !== undefined
@@ -1145,7 +1145,7 @@ const make = Effect.gen(function* () {
       }
       yield* orchestrationEngine.dispatch({
         type: "thread.conversation.rollback.complete",
-        commandId: serverCommandId("conversation-rollback-complete"),
+        commandId: yield* serverCommandId("conversation-rollback-complete"),
         threadId: event.payload.threadId,
         messageId: event.payload.messageId,
         numTurns: event.payload.numTurns,

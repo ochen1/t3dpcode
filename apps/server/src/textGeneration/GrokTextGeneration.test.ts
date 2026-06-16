@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { createModelSelection } from "@t3tools/shared/model";
-import { expect } from "vite-plus/test";
+import { expect } from "vitest";
 import { GrokSettings, ProviderInstanceId } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";

@@ -6,7 +6,7 @@ import type {
 import { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, AtomRegistry } from "effect/unstable/reactivity";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   __resetEnvironmentApiOverridesForTests,

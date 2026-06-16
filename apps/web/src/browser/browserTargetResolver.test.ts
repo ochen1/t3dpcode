@@ -1,5 +1,5 @@
 import { EnvironmentId } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const readEnvironmentConnection = vi.fn();
 

@@ -9,7 +9,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
-import { beforeEach, describe, expect, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, vi } from "vitest";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as BrowserSession from "./BrowserSession.ts";

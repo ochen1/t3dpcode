@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import type * as EffectAcpSchema from "effect-acp/schema";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import { applyCursorAcpModelSelection, buildCursorAcpSpawnInput } from "./CursorAcpSupport.ts";
 

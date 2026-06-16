@@ -12,7 +12,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { createModelSelection } from "@t3tools/shared/model";
-import { expect } from "vite-plus/test";
+import { expect } from "vitest";
 
 import { CursorSettings, ProviderInstanceId } from "@t3tools/contracts";
 

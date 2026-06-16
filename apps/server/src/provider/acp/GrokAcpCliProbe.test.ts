@@ -11,7 +11,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { describe, expect } from "vite-plus/test";
+import { describe, expect } from "vitest";
 
 import { makeGrokAcpRuntime } from "./GrokAcpSupport.ts";
 

@@ -290,12 +290,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
 
       const createdEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...withEventBase({
+        ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-        }),
+        })),
         type: "thread.created",
         payload: {
           threadId: command.threadId,
@@ -312,27 +312,37 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
 
-      const importedMessageEvents = command.importedMessages.map(
-        (message): Omit<OrchestrationEvent, "sequence"> => ({
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
+      const importedMessageEvents = yield* Effect.forEach(
+        command.importedMessages,
+        (message): Effect.Effect<
+          Omit<OrchestrationEvent, "sequence">,
+          PlatformError.PlatformError,
+          Crypto.Crypto
+        > =>
+          Effect.gen(function* () {
+            return {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.message-sent",
+              payload: {
+                threadId: command.threadId,
+                messageId: message.messageId,
+                role: message.role,
+                text: message.text,
+                ...(message.attachments !== undefined
+                  ? { attachments: message.attachments }
+                  : {}),
+                turnId: null,
+                streaming: false,
+                createdAt: message.createdAt,
+                updatedAt: message.updatedAt,
+              },
+            };
           }),
-          type: "thread.message-sent",
-          payload: {
-            threadId: command.threadId,
-            messageId: message.messageId,
-            role: message.role,
-            text: message.text,
-            ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-            turnId: null,
-            streaming: false,
-            createdAt: message.createdAt,
-            updatedAt: message.updatedAt,
-          },
-        }),
       );
 
       return [createdEvent, ...importedMessageEvents];
@@ -574,12 +584,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       return {
-        ...withEventBase({
+        ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-        }),
+        })),
         type: "thread.turn-start-requested",
         payload: {
           threadId: command.threadId,
@@ -715,12 +725,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       return {
-        ...withEventBase({
+        ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-        }),
+        })),
         type: "thread.conversation-rollback-requested",
         payload: {
           threadId: command.threadId,
@@ -904,12 +914,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       return {
-        ...withEventBase({
+        ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt: command.createdAt,
           commandId: command.commandId,
-        }),
+        })),
         type: "thread.conversation-rolled-back",
         payload: {
           threadId: command.threadId,

@@ -1,6 +1,6 @@
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { describe, expect } from "vite-plus/test";
+import { describe, expect } from "vitest";
 
 import {
   playwrightInjectedRuntimeInstallExpression,

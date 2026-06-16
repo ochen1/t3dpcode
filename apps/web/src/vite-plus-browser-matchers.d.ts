@@ -1,7 +1,7 @@
-import type { ExpectPollOptions } from "vite-plus/test";
-import type { Locator } from "vite-plus/test/browser";
+import type { ExpectPollOptions } from "vitest";
+import type { Locator } from "@vitest/browser/context";
 
-declare module "vite-plus/test" {
+declare module "vitest" {
   interface ExpectStatic {
     element: (
       element: HTMLElement | SVGElement | null | Locator,

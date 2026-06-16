@@ -3,7 +3,7 @@ import { assert, it } from "@effect/vitest";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { vi } from "vite-plus/test";
+import { vi } from "vitest";
 
 import { PtyAdapter } from "../Services/PTY.ts";
 import { layer } from "./NodePTY.ts";

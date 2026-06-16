@@ -8,6 +8,7 @@ import {
   type ProjectScript,
   type ProjectId,
   type ProviderApprovalDecision,
+  type PreviewAnnotationPayload,
   ProviderInstanceId,
   type ServerProvider,
   type ResolvedKeybindingsConfig,
@@ -58,6 +59,9 @@ import {
   findLatestProposedPlan,
   deriveWorkLogEntries,
   hasActionableProposedPlan,
+  hasToolActivityForTurn,
+  deriveCompletionDividerBeforeEntryId,
+  formatElapsed,
   isLatestTurnSettled,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
@@ -121,7 +125,7 @@ import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
-import { cn, randomHex } from "~/lib/utils";
+import { cn, randomHex, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
@@ -2218,6 +2222,25 @@ function ChatViewContent(props: ChatViewProps) {
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
+  const completionSummary = useMemo(() => {
+    if (!latestTurnSettled) return null;
+    if (!activeLatestTurn?.startedAt) return null;
+    if (!activeLatestTurn.completedAt) return null;
+    if (!latestTurnHasToolActivity) return null;
+
+    const elapsed = formatElapsed(activeLatestTurn.startedAt, activeLatestTurn.completedAt);
+    return elapsed ? `Worked for ${elapsed}` : null;
+  }, [
+    activeLatestTurn?.completedAt,
+    activeLatestTurn?.startedAt,
+    latestTurnHasToolActivity,
+    latestTurnSettled,
+  ]);
+  const completionDividerBeforeEntryId = useMemo(() => {
+    if (!latestTurnSettled) return null;
+    if (!completionSummary) return null;
+    return deriveCompletionDividerBeforeEntryId(timelineEntries, activeLatestTurn);
+  }, [activeLatestTurn, completionSummary, latestTurnSettled, timelineEntries]);
   const { turnDiffSummaries } = useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
     const byMessageId = new Map<MessageId, TurnDiffSummary>();
@@ -3700,6 +3723,8 @@ function ChatViewContent(props: ChatViewProps) {
           prompt: queuedChatTurn.prompt,
           images: queuedChatTurn.images,
           terminalContexts: queuedChatTurn.terminalContexts,
+          elementContexts: [] as ElementContextDraft[],
+          previewAnnotations: [] as PreviewAnnotationPayload[],
           selectedPromptEffort: queuedChatTurn.selectedPromptEffort,
           selectedModelOptionsForDispatch: null,
           selectedModelSelection: queuedChatTurn.selectedModelSelection,
@@ -4968,6 +4993,7 @@ function ChatViewContent(props: ChatViewProps) {
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
+                latestTurn={activeLatestTurn}
                 completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                 completionSummary={completionSummary}
                 turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}

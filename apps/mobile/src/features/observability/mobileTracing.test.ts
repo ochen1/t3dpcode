@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { vi } from "vite-plus/test";
+import { vi } from "vitest";
 
 import { remoteHttpClientLayer } from "@t3tools/client-runtime";
 

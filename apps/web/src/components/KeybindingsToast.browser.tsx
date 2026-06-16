@@ -29,7 +29,7 @@ import {
   expect,
   it,
   vi,
-} from "vite-plus/test";
+} from "vitest";
 import { render } from "vitest-browser-react";
 
 import { useComposerDraftStore } from "../composerDraftStore";

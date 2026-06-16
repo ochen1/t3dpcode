@@ -8,7 +8,7 @@ import {
   TurnId,
   type OrchestrationShellSnapshot,
 } from "@t3tools/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSubscribeThread = vi.fn();
 const mockThreadUnsubscribe = vi.fn();
@@ -84,6 +84,9 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     cloud: {
       getRelayClientStatus: vi.fn(),
       installRelayClient: vi.fn(),
+    },
+    provider: {
+      compactThread: vi.fn(),
     },
     orchestration: {
       dispatchCommand: vi.fn(),

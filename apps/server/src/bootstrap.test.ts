@@ -10,7 +10,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
-import { vi } from "vite-plus/test";
+import { vi } from "vitest";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import { readBootstrapEnvelope } from "./bootstrap.ts";

@@ -4,7 +4,7 @@ import { it as effectIt } from "@effect/vitest";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Net from "@t3tools/shared/Net";
 import { Effect, Layer } from "effect";
-import { expect } from "vite-plus/test";
+import { expect } from "vitest";
 
 import { ProcessRunner } from "../processRunner.ts";
 import * as PortScanner from "./PortScanner.ts";

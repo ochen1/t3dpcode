@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { afterEach } from "vite-plus/test";
+import { afterEach } from "vitest";
 
 import { fetchCloudAuth, validateClerkFrontendApiUrl } from "./cloudAuth.ts";
 

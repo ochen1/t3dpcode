@@ -151,6 +151,15 @@ interface MessagesTimelineProps {
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   latestTurn: TimelineLatestTurn | null;
+  /**
+   * Fork divider inputs. The upstream turn-fold mechanism (driven by
+   * `latestTurn`) now renders the "Worked for …" completion summary inline,
+   * so these are accepted for compatibility with the fork call site but are
+   * not required to drive rendering.
+   */
+  activeTurnId?: TurnId | null;
+  completionDividerBeforeEntryId?: string | null;
+  completionSummary?: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;

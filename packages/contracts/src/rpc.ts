@@ -359,7 +359,7 @@ export const WsSourceControlPublishRepositoryRpc = Rpc.make(
 export const WsProviderCompactThreadRpc = Rpc.make(WS_METHODS.providerCompactThread, {
   payload: ProviderCompactThreadInput,
   success: Schema.Void,
-  error: ProviderOperationError,
+  error: Schema.Union([ProviderOperationError, EnvironmentAuthorizationError]),
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {

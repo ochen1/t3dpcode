@@ -1,6 +1,6 @@
 import "../index.css";
 
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { DiffPanelShell } from "./DiffPanelShell";

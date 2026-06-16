@@ -29,7 +29,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpResponse, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
-import { page } from "vite-plus/test/browser";
+import { page } from "@vitest/browser/context";
 import {
   afterAll,
   afterEach,
@@ -39,7 +39,7 @@ import {
   expect,
   it,
   vi,
-} from "vite-plus/test";
+} from "vitest";
 import { render } from "vitest-browser-react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
