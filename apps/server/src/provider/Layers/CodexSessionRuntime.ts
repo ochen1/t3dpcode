@@ -1352,7 +1352,11 @@ export const makeCodexSessionRuntime = (
           });
           const response = yield* decodeV2TurnSteerResponse(rawResponse).pipe(
             Effect.mapError((error) =>
-              toProtocolParseError("Invalid turn/steer response payload", error),
+              CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+                "decode-response-payload",
+                error,
+                { method: "turn/steer" },
+              ),
             ),
           );
           const turnId = TurnId.make(response.turnId);

@@ -394,14 +394,14 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         runtimeMode: "full-access",
       });
       const runtime = sessionRuntimeFactory.lastRuntime;
-      assert.ok(runtime);
+      NodeAssert.ok(runtime);
       runtime.compactThreadImpl.mockClear();
       const compactThread = adapter.compactThread;
-      assert.ok(compactThread);
+      NodeAssert.ok(compactThread);
 
       yield* compactThread(asThreadId("sess-compact"));
 
-      assert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
+      NodeAssert.equal(runtime.compactThreadImpl.mock.calls.length, 1);
     }),
   );
 

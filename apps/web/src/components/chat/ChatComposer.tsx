@@ -800,7 +800,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const canOfferCompactCommand =
     isServerThread &&
     activeThread?.session !== null &&
-    activeThread?.session?.status !== "closed" &&
     selectedProvider === ProviderDriverKind.make("codex");
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
     () => selectedProviderEntry?.models ?? [],

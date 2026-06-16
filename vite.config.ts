@@ -29,7 +29,7 @@ export default defineConfig({
       "dist",
       "dist-electron",
       "node_modules",
-      "pnpm-lock.yaml",
+      "bun.lock",
       "*.tsbuildinfo",
       "**/routeTree.gen.ts",
       "apps/mobile/android/**",
@@ -51,12 +51,13 @@ export default defineConfig({
   },
   lint: {
     ignorePatterns: [
+      ".plans",
       ".repos",
       ".repos/**",
       "dist",
       "dist-electron",
       "node_modules",
-      "pnpm-lock.yaml",
+      "bun.lock",
       "*.tsbuildinfo",
       "**/routeTree.gen.ts",
       "apps/mobile/android/**",

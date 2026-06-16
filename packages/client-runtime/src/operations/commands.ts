@@ -257,19 +257,16 @@ export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => Com
     });
   });
 
-export const rollbackThreadConversation: (
-  input: RollbackThreadConversationInput,
-) => CommandEffect = Effect.fn("EnvironmentCommands.rollbackThreadConversation")(function* (
-  input,
-) {
-  const metadata = yield* timestampedCommandMetadata(input);
-  return yield* dispatch({
-    ...input,
-    type: "thread.conversation.rollback",
-    commandId: metadata.commandId,
-    createdAt: metadata.createdAt,
+export const rollbackThreadConversation: (input: RollbackThreadConversationInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.rollbackThreadConversation")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.conversation.rollback",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
   });
-});
 
 export const stopThreadSession: (input: StopThreadSessionInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.stopThreadSession",

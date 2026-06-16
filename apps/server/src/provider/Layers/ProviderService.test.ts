@@ -53,8 +53,6 @@ import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
-import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
-import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
 import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
@@ -875,9 +873,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
       yield* provider.stopSession({ threadId });
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions())),
-    ),
+    }).pipe(Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions()))),
   );
 
   it.effect("routes provider operations and rollback conversation", () =>

@@ -3572,8 +3572,7 @@ function ChatViewContent(props: ChatViewProps) {
       !activeThread ||
       !isServerThread ||
       !activeThread.session ||
-      activeThread.session.status === "closed" ||
-      activeThread.session.provider !== ProviderDriverKind.make("codex")
+      selectedProvider !== ProviderDriverKind.make("codex")
     ) {
       toastManager.add(
         stackedThreadToast({
@@ -3600,7 +3599,14 @@ function ChatViewContent(props: ChatViewProps) {
       return false;
     }
     return true;
-  }, [activeThread, compactThread, environmentId, isServerThread, setThreadError]);
+  }, [
+    activeThread,
+    compactThread,
+    environmentId,
+    isServerThread,
+    selectedProvider,
+    setThreadError,
+  ]);
 
   const onSend = async (
     e?: {
@@ -3632,6 +3638,9 @@ function ChatViewContent(props: ChatViewProps) {
           prompt: queuedChatTurn.prompt,
           images: queuedChatTurn.images,
           terminalContexts: queuedChatTurn.terminalContexts,
+          elementContexts: [],
+          previewAnnotations: [],
+          reviewComments: [],
           selectedPromptEffort: queuedChatTurn.selectedPromptEffort,
           selectedModelOptionsForDispatch: null,
           selectedModelSelection: queuedChatTurn.selectedModelSelection,
@@ -3738,7 +3747,7 @@ function ChatViewContent(props: ChatViewProps) {
             role: message.role,
             text: message.text,
             createdAt: message.createdAt,
-            updatedAt: message.completedAt ?? message.createdAt,
+            updatedAt: message.updatedAt ?? message.createdAt,
           };
           if (!message.attachments || message.attachments.length === 0) {
             return importedMessage;
@@ -3771,7 +3780,7 @@ function ChatViewContent(props: ChatViewProps) {
       });
       if (forkResult._tag === "Failure") {
         setThreadError(activeThread.id, "Failed to fork thread.");
-        return;
+        return false;
       }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);

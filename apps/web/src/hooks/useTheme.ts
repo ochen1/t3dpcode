@@ -124,6 +124,45 @@ function readStoredThemeState(): ThemeState {
   }
 }
 
+export function readThemePreference(): ThemePreference {
+  if (!hasThemeStorage()) {
+    return DEFAULT_THEME_STATE.mode;
+  }
+
+  try {
+    return parseStoredThemeState(localStorage.getItem(STORAGE_KEY)).mode;
+  } catch (cause) {
+    throw new ThemeStorageError({
+      operation: "read",
+      storageKey: STORAGE_KEY,
+      cause,
+    });
+  }
+}
+
+export function writeThemePreference(theme: ThemePreference) {
+  if (!hasThemeStorage()) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeThemeState({
+        ...readStoredThemeState(),
+        mode: theme,
+      }),
+    );
+  } catch (cause) {
+    throw new ThemeStorageError({
+      operation: "write",
+      storageKey: STORAGE_KEY,
+      theme,
+      cause,
+    });
+  }
+}
+
 function writeStoredThemeState(state: ThemeState) {
   if (!hasThemeStorage()) {
     return;

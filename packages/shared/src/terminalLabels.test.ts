@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "vitest";
 
 import type { TerminalSummary } from "@t3tools/contracts";
 import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";

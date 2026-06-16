@@ -2567,7 +2567,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         toolName: tool.toolName,
         input: tool.input,
         result: persistedToolImages.result,
-        ...(persistedToolImages.images.length > 0 ? { attachments: persistedToolImages.images } : {}),
+        ...(persistedToolImages.images.length > 0
+          ? { attachments: persistedToolImages.images }
+          : {}),
       };
 
       const updatedStamp = yield* makeEventStamp();

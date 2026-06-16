@@ -1332,16 +1332,16 @@ const makeWsRpcLayer = (currentSession: EnvironmentAuth.AuthenticatedSession) =>
             WS_METHODS.providerCompactThread,
             Effect.gen(function* () {
               const providerService = yield* ProviderService;
-              return yield* providerService.compactThread(input);
-            }).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProviderOperationError({
-                    message: cause.message,
-                    cause,
-                  }),
-              ),
-            ),
+              return yield* providerService.compactThread(input).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderOperationError({
+                      message: cause.message,
+                      cause,
+                    }),
+                ),
+              );
+            }),
             { "rpc.aggregate": "provider" },
           ),
         [WS_METHODS.projectsSearchEntries]: (input) =>
