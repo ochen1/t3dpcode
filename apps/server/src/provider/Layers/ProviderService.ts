@@ -58,6 +58,7 @@ import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
+const CODEX_PROVIDER = "codex";
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -140,6 +141,10 @@ function toRuntimePayloadFromSession(
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
   };
+}
+
+function providerUsesProductMcp(provider: ProviderDriverKind): boolean {
+  return provider !== CODEX_PROVIDER;
 }
 
 function readPersistedModelSelection(
@@ -228,6 +233,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     McpSessionRegistry.revokeActiveMcpThread(threadId).pipe(
       Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
     );
+  const reconcileMcpSession = (
+    threadId: ThreadId,
+    provider: ProviderDriverKind,
+    providerInstanceId: ProviderInstanceId,
+  ) => (providerUsesProductMcp(provider) ? prepareMcpSession(threadId, providerInstanceId) : clearMcpSession(threadId));
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
@@ -399,7 +409,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
+      yield* reconcileMcpSession(input.binding.threadId, input.binding.provider, bindingInstanceId);
       const resumed = yield* adapter
         .startSession({
           threadId: input.binding.threadId,
@@ -592,7 +602,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
-        yield* prepareMcpSession(threadId, resolvedInstanceId);
+        yield* reconcileMcpSession(threadId, resolvedProvider, resolvedInstanceId);
         const session = yield* adapter
           .startSession({
             ...input,

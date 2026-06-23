@@ -12,6 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  EnvironmentId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -50,7 +51,10 @@ import { makeProviderServiceLive } from "./ProviderService.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as ProviderSessionRuntime from "../../persistence/ProviderSessionRuntime.ts";
+import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
+import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
 import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
@@ -847,6 +851,35 @@ it.effect(
 );
 
 routing.layer("ProviderServiceLive routing", (it) => {
+  it.effect("clears stale MCP session state before starting a Codex thread", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-codex-no-mcp");
+
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("env-test"),
+        threadId,
+        providerSessionId: "provider-session-stale",
+        providerInstanceId: claudeAgentInstanceId,
+        endpoint: "http://127.0.0.1:3000/mcp",
+        authorizationHeader: "Bearer stale-token",
+      });
+
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      assert.equal(McpProviderSession.readMcpProviderSession(threadId), undefined);
+      yield* provider.stopSession({ threadId });
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions())),
+    ),
+  );
+
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
