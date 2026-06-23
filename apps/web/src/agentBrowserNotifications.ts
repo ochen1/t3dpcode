@@ -11,7 +11,6 @@ import type {
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 
 import { isElectron } from "./env";
-import { getServerConfig } from "./rpc/serverState";
 
 const MAX_REMEMBERED_NOTIFICATIONS = 500;
 
@@ -149,6 +148,7 @@ export function observeAgentThreadNotificationState(
 export function handleAgentBrowserNotificationShellSnapshot(
   snapshot: OrchestrationShellSnapshot,
   environmentId: EnvironmentId,
+  notificationsEnabled = DEFAULT_SERVER_SETTINGS.enableDesktopNotifications,
 ): void {
   for (const thread of snapshot.threads) {
     dispatchAgentBrowserNotificationDecision(
@@ -162,6 +162,7 @@ export function handleAgentBrowserNotificationShellSnapshot(
         },
         globalNotificationState,
       ),
+      notificationsEnabled,
     );
   }
 }
@@ -169,6 +170,7 @@ export function handleAgentBrowserNotificationShellSnapshot(
 export function handleAgentBrowserNotificationShellEvent(
   event: OrchestrationShellStreamEvent,
   environmentId: EnvironmentId,
+  notificationsEnabled = DEFAULT_SERVER_SETTINGS.enableDesktopNotifications,
 ): void {
   if (event.kind !== "thread-upserted") {
     return;
@@ -185,6 +187,7 @@ export function handleAgentBrowserNotificationShellEvent(
       },
       globalNotificationState,
     ),
+    notificationsEnabled,
   );
 }
 
@@ -192,6 +195,7 @@ export function handleAgentBrowserNotificationDomainEvents(
   events: ReadonlyArray<OrchestrationEvent>,
   environmentId: EnvironmentId,
   resolveTitle: ThreadTitleResolver,
+  notificationsEnabled = DEFAULT_SERVER_SETTINGS.enableDesktopNotifications,
 ): void {
   for (const event of events) {
     if (event.type !== "thread.session-set") {
@@ -209,6 +213,7 @@ export function handleAgentBrowserNotificationDomainEvents(
         },
         globalNotificationState,
       ),
+      notificationsEnabled,
     );
   }
 }
@@ -241,20 +246,14 @@ export function buildAgentThreadNotificationUrl(
 
 function dispatchAgentBrowserNotificationDecision(
   decision: AgentBrowserNotificationDecision | null,
+  notificationsEnabled = DEFAULT_SERVER_SETTINGS.enableDesktopNotifications,
 ): void {
-  if (!decision || !areAgentBrowserNotificationsEnabled()) {
+  if (!decision || !notificationsEnabled) {
     return;
   }
 
   void playAgentBrowserNotificationSound();
   showAgentBrowserNotification(decision);
-}
-
-function areAgentBrowserNotificationsEnabled(): boolean {
-  return (
-    getServerConfig()?.settings.enableDesktopNotifications ??
-    DEFAULT_SERVER_SETTINGS.enableDesktopNotifications
-  );
 }
 
 function supportsBrowserNotifications(): boolean {

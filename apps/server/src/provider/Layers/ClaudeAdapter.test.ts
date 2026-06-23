@@ -37,7 +37,13 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  collectToolResultImageSources,
+  collectToolUseResultImageSources,
+  makeClaudeAdapter,
+  sanitizeToolResultImageContent,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -3785,5 +3791,76 @@ describe("ClaudeAdapterLive", () => {
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
+  });
+});
+
+describe("tool-result image extraction", () => {
+  it("collects Anthropic and raw-MCP image content blocks", () => {
+    const content = [
+      { type: "text", text: "Captured screenshot" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+      { type: "image", data: "REVG", mimeType: "image/webp" },
+      { type: "image", source: { type: "url", url: "https://example.com/x.png" } },
+    ];
+
+    assert.deepEqual(collectToolResultImageSources(content), [
+      { contentIndex: 1, mimeType: "image/png", base64: "QUJD" },
+      { contentIndex: 2, mimeType: "image/webp", base64: "REVG" },
+    ]);
+  });
+
+  it("returns nothing when the content is not an array", () => {
+    assert.deepEqual(collectToolResultImageSources("not-an-array"), []);
+    assert.deepEqual(collectToolResultImageSources(undefined), []);
+  });
+
+  it("replaces persisted image payloads with compact references", () => {
+    const block = {
+      type: "tool_result",
+      tool_use_id: "tool-1",
+      content: [
+        { type: "text", text: "ok" },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+      ],
+    };
+    const references = new Map([
+      [1, { attachmentId: "thread-1-abc", mimeType: "image/png", sizeBytes: 3 }],
+    ]);
+
+    const sanitized = sanitizeToolResultImageContent(block, references);
+    assert.deepEqual(sanitized.content, [
+      { type: "text", text: "ok" },
+      { type: "image", attachmentId: "thread-1-abc", mimeType: "image/png", sizeBytes: 3 },
+    ]);
+    // Original block is left untouched (no base64 leaks once references replace it).
+    assert.equal((block.content[1] as { source: { data: string } }).source.data, "QUJD");
+  });
+
+  it("leaves the block untouched when there are no references", () => {
+    const block = { type: "tool_result", content: [{ type: "text", text: "ok" }] };
+    assert.equal(sanitizeToolResultImageContent(block, new Map()), block);
+  });
+});
+
+describe("Read tool image extraction (tool_use_result)", () => {
+  it("extracts the image from a FileReadOutput structured result", () => {
+    const toolUseResult = {
+      type: "image",
+      file: { base64: "QUJD", type: "image/png", originalSize: 3 },
+    };
+
+    assert.deepEqual(collectToolUseResultImageSources(toolUseResult), [
+      { contentIndex: -1, mimeType: "image/png", base64: "QUJD" },
+    ]);
+  });
+
+  it("ignores non-image and malformed structured results", () => {
+    assert.deepEqual(
+      collectToolUseResultImageSources({ type: "text", file: { content: "hi" } }),
+      [],
+    );
+    assert.deepEqual(collectToolUseResultImageSources({ type: "image" }), []);
+    assert.deepEqual(collectToolUseResultImageSources({ type: "image", file: {} }), []);
+    assert.deepEqual(collectToolUseResultImageSources(undefined), []);
   });
 });

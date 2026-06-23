@@ -116,7 +116,7 @@ export class ProviderOperationError extends Schema.TaggedErrorClass<ProviderOper
   "ProviderOperationError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

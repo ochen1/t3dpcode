@@ -27,6 +27,7 @@ import {
   type CanonicalRequestType,
   type ClaudeSettings,
   EventId,
+  type ChatImageAttachment,
   type ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -42,6 +43,7 @@ import {
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ThreadId,
   TurnId,
   type UserInputQuestion,
@@ -67,8 +69,9 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { inferImageExtension } from "../../imageMime.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
@@ -1187,6 +1190,122 @@ function toolResultBlocksFromUserMessage(message: SDKMessage): Array<{
   }
 
   return blocks;
+}
+
+const TOOL_RESULT_MAX_IMAGES = 8;
+
+interface ToolResultImageSource {
+  readonly contentIndex: number;
+  readonly mimeType: string;
+  readonly base64: string;
+}
+
+interface ToolResultImageReference {
+  readonly attachmentId: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+}
+
+/**
+ * Collects base64 image payloads embedded in a `tool_result` block's content.
+ * Handles both the Anthropic block shape
+ * (`{ type: "image", source: { type: "base64", media_type, data } }`) and the
+ * raw MCP shape (`{ type: "image", data, mimeType }`) that some servers emit.
+ */
+export function collectToolResultImageSources(blockContent: unknown): Array<ToolResultImageSource> {
+  if (!Array.isArray(blockContent)) {
+    return [];
+  }
+  const sources: Array<ToolResultImageSource> = [];
+  for (let index = 0; index < blockContent.length; index += 1) {
+    const entry = blockContent[index];
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (record.type !== "image") {
+      continue;
+    }
+
+    const source = record.source;
+    if (source && typeof source === "object") {
+      const sourceRecord = source as Record<string, unknown>;
+      if (
+        sourceRecord.type === "base64" &&
+        typeof sourceRecord.data === "string" &&
+        typeof sourceRecord.media_type === "string"
+      ) {
+        sources.push({
+          contentIndex: index,
+          mimeType: sourceRecord.media_type,
+          base64: sourceRecord.data,
+        });
+        continue;
+      }
+    }
+
+    if (typeof record.data === "string" && typeof record.mimeType === "string") {
+      sources.push({ contentIndex: index, mimeType: record.mimeType, base64: record.data });
+    }
+  }
+  return sources;
+}
+
+/**
+ * Extracts the image payload from a built-in Read tool's structured result.
+ * The Claude Agent SDK represents an image file read as a `FileReadOutput` of
+ * shape `{ type: "image", file: { base64, type } }` carried on the message's
+ * `tool_use_result`, rather than as a `tool_result.content` image block. These
+ * have no position in the content array, so they carry a sentinel `contentIndex`
+ * of -1 and are never used to rewrite the block content.
+ */
+export function collectToolUseResultImageSources(
+  toolUseResult: unknown,
+): Array<ToolResultImageSource> {
+  if (!toolUseResult || typeof toolUseResult !== "object") {
+    return [];
+  }
+  const record = toolUseResult as Record<string, unknown>;
+  if (record.type !== "image" || !record.file || typeof record.file !== "object") {
+    return [];
+  }
+  const file = record.file as Record<string, unknown>;
+  if (typeof file.base64 !== "string" || typeof file.type !== "string") {
+    return [];
+  }
+  return [{ contentIndex: -1, mimeType: file.type, base64: file.base64 }];
+}
+
+/**
+ * Returns a copy of the tool-result block with the heavy base64 image payloads
+ * replaced by compact references to the persisted attachments. This keeps the
+ * runtime event log and shell snapshots small while preserving the block shape
+ * for downstream consumers.
+ */
+export function sanitizeToolResultImageContent(
+  block: Record<string, unknown>,
+  referenceByIndex: ReadonlyMap<number, ToolResultImageReference>,
+): Record<string, unknown> {
+  if (referenceByIndex.size === 0) {
+    return block;
+  }
+  const content = block.content;
+  if (!Array.isArray(content)) {
+    return block;
+  }
+  const sanitizedContent = content.map((entry, index) => {
+    const reference = referenceByIndex.get(index);
+    if (!reference) {
+      return entry;
+    }
+    return {
+      type: "image",
+      attachmentId: reference.attachmentId,
+      mimeType: reference.mimeType,
+      sizeBytes: reference.sizeBytes,
+    };
+  });
+  return { ...block, content: sanitizedContent };
 }
 
 function toSessionError(
@@ -2333,6 +2452,89 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
   });
 
+  /**
+   * Persists any images returned by a tool result to the shared attachment
+   * store and returns a sanitized result block that references them by id
+   * instead of carrying the base64 payload through the event log. Covers both
+   * `tool_result.content` image blocks (e.g. a Chrome DevTools MCP screenshot)
+   * and the built-in Read tool's structured `tool_use_result` image payload.
+   */
+  const persistToolResultImages = Effect.fn("persistToolResultImages")(function* (
+    threadId: ThreadId,
+    block: Record<string, unknown>,
+    toolUseResult: unknown,
+  ) {
+    // Content blocks take priority; the structured result is a fallback for the
+    // Read tool, which carries the image off to the side rather than inline.
+    const contentSources = collectToolResultImageSources(block.content);
+    const sources = (
+      contentSources.length > 0 ? contentSources : collectToolUseResultImageSources(toolUseResult)
+    ).slice(0, TOOL_RESULT_MAX_IMAGES);
+    if (sources.length === 0) {
+      return { images: [] as Array<ChatImageAttachment>, result: block };
+    }
+
+    const images: Array<ChatImageAttachment> = [];
+    const referenceByIndex = new Map<number, ToolResultImageReference>();
+    let imageOrdinal = 0;
+
+    for (const source of sources) {
+      const mimeType = source.mimeType.toLowerCase();
+      if (!mimeType.startsWith("image/")) {
+        continue;
+      }
+
+      const bytes = Buffer.from(source.base64, "base64");
+      if (bytes.byteLength === 0 || bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+        continue;
+      }
+
+      const attachmentId = createAttachmentId(threadId);
+      if (!attachmentId) {
+        continue;
+      }
+
+      imageOrdinal += 1;
+      const attachment: ChatImageAttachment = {
+        type: "image",
+        id: attachmentId,
+        name: `tool-image-${imageOrdinal}${inferImageExtension({ mimeType })}`,
+        mimeType,
+        sizeBytes: bytes.byteLength,
+      };
+
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) {
+        continue;
+      }
+
+      const written = yield* fileSystem
+        .makeDirectory(path.dirname(attachmentPath), { recursive: true })
+        .pipe(
+          Effect.andThen(fileSystem.writeFile(attachmentPath, bytes)),
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!written) {
+        continue;
+      }
+
+      images.push(attachment);
+      if (source.contentIndex >= 0) {
+        referenceByIndex.set(source.contentIndex, {
+          attachmentId,
+          mimeType,
+          sizeBytes: bytes.byteLength,
+        });
+      }
+    }
+
+    return { images, result: sanitizeToolResultImageContent(block, referenceByIndex) };
+  });
+
   const handleUserMessage = Effect.fn("handleUserMessage")(function* (
     context: ClaudeSessionContext,
     message: SDKMessage,
@@ -2356,10 +2558,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const [index, tool] = toolEntry;
       const itemStatus = toolResult.isError ? "failed" : "completed";
       const toolUseResult = readClaudeToolUseResult(message);
+      const persistedToolImages = yield* persistToolResultImages(
+        context.session.threadId,
+        toolResult.block,
+        toolUseResult,
+      );
       const toolData = {
         toolName: tool.toolName,
         input: tool.input,
-        result: toolResult.block,
+        result: persistedToolImages.result,
+        ...(persistedToolImages.images.length > 0 ? { attachments: persistedToolImages.images } : {}),
       };
 
       const updatedStamp = yield* makeEventStamp();

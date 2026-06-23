@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import { handleAgentBrowserNotificationShellSnapshot } from "../agentBrowserNotifications";
 import { useEnvironments } from "../state/environments";
+import { serverEnvironment } from "../state/server";
 import { environmentSnapshotAtom } from "../state/shell";
 
 export function AgentBrowserNotificationObserver() {
@@ -25,13 +26,18 @@ function EnvironmentAgentBrowserNotificationObserver(props: {
   readonly environmentId: EnvironmentId;
 }) {
   const snapshot = useAtomValue(environmentSnapshotAtom(props.environmentId));
+  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
 
   useEffect(() => {
     if (snapshot === null) {
       return;
     }
-    handleAgentBrowserNotificationShellSnapshot(snapshot, props.environmentId);
-  }, [props.environmentId, snapshot]);
+    handleAgentBrowserNotificationShellSnapshot(
+      snapshot,
+      props.environmentId,
+      serverConfig?.settings.enableDesktopNotifications,
+    );
+  }, [props.environmentId, serverConfig?.settings.enableDesktopNotifications, snapshot]);
 
   return null;
 }
