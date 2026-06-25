@@ -194,16 +194,16 @@ describe("buildTurnStartParams", () => {
   });
 });
 
-describe("T3 browser developer instructions", () => {
-  it("prefers the product-native preview tools in both collaboration modes", () => {
+describe("Codex developer instructions", () => {
+  it("do not mention T3 browser preview tools in either collaboration mode", () => {
     for (const instructions of [
       CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
       CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
     ]) {
-      NodeAssert.match(instructions, /t3-code/);
-      NodeAssert.match(instructions, /preview_status/);
-      NodeAssert.match(instructions, /preview_open/);
-      NodeAssert.match(instructions, /Do not switch to global browser skills/);
+      NodeAssert.doesNotMatch(instructions, /T3 Code collaborative browser/);
+      NodeAssert.doesNotMatch(instructions, /t3-code/);
+      NodeAssert.doesNotMatch(instructions, /preview_/);
+      NodeAssert.doesNotMatch(instructions, /Do not switch to global browser skills/);
     }
   });
 });

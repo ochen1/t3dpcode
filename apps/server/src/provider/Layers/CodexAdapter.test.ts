@@ -35,6 +35,7 @@ import * as Stream from "effect/Stream";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -312,6 +313,29 @@ validationLayer("CodexAdapterLive validation", (it) => {
         runtimeMode: "full-access",
       });
     }),
+  );
+
+  it.effect("does not attach the T3 preview MCP server to Codex sessions", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const threadId = asThreadId("thread-with-mcp-session");
+      McpProviderSession.setMcpProviderSession({
+        threadId,
+        endpoint: "http://127.0.0.1:1234/mcp",
+        authorizationHeader: "Bearer preview-token",
+      });
+
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const runtimeOptions = validationRuntimeFactory.factory.mock.calls[0]?.[0];
+      NodeAssert.equal(runtimeOptions?.appServerArgs, undefined);
+      NodeAssert.equal(runtimeOptions?.environment, undefined);
+    }).pipe(Effect.ensuring(Effect.sync(() => McpProviderSession.clearAllMcpProviderSessions()))),
   );
 });
 
