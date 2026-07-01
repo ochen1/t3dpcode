@@ -17,11 +17,24 @@
         const DARK_BACKGROUND = "#161616";
         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
         try {
-          const storedTheme = window.localStorage.getItem("t3code:theme");
-          const theme =
-            storedTheme === "light" || storedTheme === "dark" || storedTheme === "system"
-              ? storedTheme
-              : "system";
+          const readStoredTheme = () => {
+            const raw =
+              window.localStorage.getItem("t3code:theme") ??
+              window.localStorage.getItem("synara:theme");
+            if (raw === "light" || raw === "dark" || raw === "system") return raw;
+            if (!raw) return "system";
+            try {
+              const parsed = JSON.parse(raw);
+              return parsed?.mode === "light" ||
+                parsed?.mode === "dark" ||
+                parsed?.mode === "system"
+                ? parsed.mode
+                : "system";
+            } catch {
+              return "system";
+            }
+          };
+          const theme = readStoredTheme();
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const isDark = theme === "dark" || (theme === "system" && prefersDark);
           document.documentElement.classList.toggle("dark", isDark);
