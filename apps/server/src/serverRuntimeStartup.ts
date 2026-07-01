@@ -136,7 +136,7 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
 
   const { threadCount, projectCount } = yield* projectionSnapshotQuery.getCounts().pipe(
     Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup projection counts for telemetry", {
+      Effect.logWarning("failed to gather startup projection counts", {
         cause,
       }).pipe(
         Effect.as({

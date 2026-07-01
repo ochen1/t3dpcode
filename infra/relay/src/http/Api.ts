@@ -1,4 +1,3 @@
-import { createClerkClient, verifyToken } from "@clerk/backend";
 import { sql as drizzleSql } from "drizzle-orm";
 import * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
@@ -1041,15 +1040,9 @@ function hasExpectedClerkAudience(audience: unknown, expectedAudience: string): 
 function verifyClerkBearerToken(
   config: RelayConfiguration.RelayConfiguration["Service"],
   token: string,
-) {
-  return Effect.tryPromise({
-    try: () =>
-      verifyToken(token, {
-        secretKey: Redacted.value(config.clerkSecretKey),
-        audience: config.clerkJwtAudience,
-      }),
-    catch: (cause) => new ClerkTokenVerificationFailed({ cause }),
-  }).pipe(
+): Effect.Effect<{ readonly sub?: string; readonly aud?: unknown }, ClerkTokenVerificationFailed> {
+  void config;
+  return Effect.fail(new ClerkTokenVerificationFailed({ cause: "auth_disabled" })).pipe(
     Effect.withSpan("verify_clerk_bearer_token", {
       attributes: { "relay.auth.token_length": token.length },
     }),
@@ -1059,27 +1052,10 @@ function verifyClerkBearerToken(
 function verifyClerkOAuthBearerToken(
   config: RelayConfiguration.RelayConfiguration["Service"],
   token: string,
-) {
-  return Effect.tryPromise({
-    try: async () => {
-      const client = createClerkClient({
-        secretKey: Redacted.value(config.clerkSecretKey),
-        publishableKey: config.clerkPublishableKey,
-      });
-      const state = await client.authenticateRequest(
-        new Request(config.relayIssuer, {
-          headers: { authorization: `Bearer ${token}` },
-        }),
-        { acceptsToken: "oauth_token" },
-      );
-      const auth = state.toAuth();
-      if (!state.isAuthenticated || !auth.userId) {
-        throw new Error("Clerk OAuth token is not authenticated.");
-      }
-      return { sub: auth.userId };
-    },
-    catch: (cause) => new ClerkTokenVerificationFailed({ cause }),
-  });
+): Effect.Effect<{ readonly sub: string }, ClerkTokenVerificationFailed> {
+  void config;
+  void token;
+  return Effect.fail(new ClerkTokenVerificationFailed({ cause: "auth_disabled" }));
 }
 
 export function verifyRelayClientBearerToken(
