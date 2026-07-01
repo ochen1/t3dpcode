@@ -20,7 +20,6 @@ import { useWorkspaceState } from "../state/workspace";
 import { useThreadOutboxDrain } from "../state/use-thread-outbox-drain";
 import { RegistryContext } from "@effect/atom-react";
 import { appAtomRegistry } from "../state/atom-registry";
-import { CloudAuthProvider } from "../features/cloud/CloudAuthProvider";
 import {
   ClerkSettingsSheetDetentProvider,
   useClerkSettingsSheetDetent,
@@ -131,19 +130,13 @@ export default function RootLayout() {
   });
   return (
     <RegistryContext.Provider value={appAtomRegistry}>
-      <CloudAuthProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <KeyboardProvider statusBarTranslucent>
-            <SafeAreaProvider>
-              {fontsLoaded ? (
-                <AppNavigator />
-              ) : (
-                <LoadingScreen message="Loading remote workspace…" />
-              )}
-            </SafeAreaProvider>
-          </KeyboardProvider>
-        </GestureHandlerRootView>
-      </CloudAuthProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <KeyboardProvider statusBarTranslucent>
+          <SafeAreaProvider>
+            {fontsLoaded ? <AppNavigator /> : <LoadingScreen message="Loading remote workspace…" />}
+          </SafeAreaProvider>
+        </KeyboardProvider>
+      </GestureHandlerRootView>
     </RegistryContext.Provider>
   );
 }

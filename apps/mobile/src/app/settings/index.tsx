@@ -1,4 +1,3 @@
-import { useAuth, useUser } from "@clerk/expo";
 import * as Notifications from "expo-notifications";
 import { Link, Stack, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -32,6 +31,20 @@ import { useSavedRemoteConnections } from "../../state/use-remote-environment-re
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
+
+function useAuth(_options?: unknown) {
+  return {
+    getToken: async (_tokenOptions?: unknown) => null as string | null,
+    isLoaded: true,
+    isSignedIn: false,
+  };
+}
+
+function useUser() {
+  return {
+    user: null as null | { readonly primaryEmailAddress?: { readonly emailAddress?: string } },
+  };
+}
 
 export default function SettingsRouteScreen() {
   return hasCloudPublicConfig() ? <ConfiguredSettingsRouteScreen /> : <LocalSettingsRouteScreen />;

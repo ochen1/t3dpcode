@@ -5,6 +5,7 @@ import * as Config from "effect/Config";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 import * as Etag from "effect/unstable/http/Etag";
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
@@ -32,7 +33,7 @@ import {
   withoutCapturedParentSpan,
 } from "./http/Api.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
-import { makeRelayTraceLayer, RelayObservability } from "./observability.ts";
+import { makeRelayTraceLayer } from "./observability.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
 import * as AgentActivityRows from "./agentActivity/AgentActivityRows.ts";
 import * as Devices from "./agentActivity/Devices.ts";
@@ -112,7 +113,6 @@ export default class Api extends Cloudflare.Worker<Api>()(
     const relayApiZone = yield* RelayApiZone;
     const managedEndpointZone = yield* ManagedEndpointZone;
     const randomApnsDeliveryJobSigningSecret = yield* ApnsDeliveryJobSigningSecret;
-    const observability = yield* RelayObservability;
 
     //
     // 2. Create bindings
@@ -128,13 +128,9 @@ export default class Api extends Cloudflare.Worker<Api>()(
     const apnsDeliveryJobSigningSecret = yield* randomApnsDeliveryJobSigningSecret;
     const apnsDeliveryQueueSender = yield* Cloudflare.QueueBinding.bind(apnsDeliveryQueue);
 
-    const axiomDatasetName = yield* observability.traces.name;
-    const axiomIngestToken = yield* observability.workerIngestToken.token;
-    const axiomTracesEndpoint = yield* observability.traces.otelTracesEndpoint;
-
-    const clerkSecretKey = yield* Config.redacted("CLERK_SECRET_KEY");
-    const clerkPublishableKey = yield* Config.string("CLERK_PUBLISHABLE_KEY");
-    const clerkJwtAudience = yield* Config.string("CLERK_JWT_AUDIENCE");
+    const clerkSecretKey = Redacted.make("");
+    const clerkPublishableKey = "";
+    const clerkJwtAudience = "";
 
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
@@ -173,13 +169,11 @@ export default class Api extends Cloudflare.Worker<Api>()(
       });
     });
 
-    const relayTraceLayer = Layer.unwrap(
-      Effect.all({
-        tracesDatasetName: axiomDatasetName,
-        tracesEndpoint: axiomTracesEndpoint,
-        ingestToken: axiomIngestToken,
-      }).pipe(Effect.map(makeRelayTraceLayer)),
-    );
+    const relayTraceLayer = makeRelayTraceLayer({
+      tracesDatasetName: "",
+      tracesEndpoint: "",
+      ingestToken: Redacted.make(""),
+    });
 
     const runtimeLayer = Layer.empty.pipe(
       Layer.provideMerge(MobileRegistrations.layer),

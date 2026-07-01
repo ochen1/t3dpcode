@@ -8,10 +8,6 @@ import {
   readManagedRelayClerkToken,
 } from "./managedAuth";
 
-vi.mock("@clerk/react", () => ({
-  useAuth: vi.fn(),
-}));
-
 vi.mock("../lib/runtime", () => ({
   runtime: {
     runPromiseExit: vi.fn(),
