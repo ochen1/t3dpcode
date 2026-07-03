@@ -4,6 +4,8 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationThread,
+  TurnId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -26,6 +28,36 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const forkedThreadTitle = (title: string): string => `${title} (fork)`;
 const forkedMessageId = (threadId: string, index: number): MessageId =>
   MessageId.make(`${threadId}:fork-message:${String(index).padStart(5, "0")}`);
+const forkedTurnId = (threadId: string, index: number): TurnId =>
+  TurnId.make(`${threadId}:fork-turn:${String(index).padStart(5, "0")}`);
+const forkedActivityId = (threadId: string, index: number): EventId =>
+  EventId.make(`${threadId}:fork-activity:${String(index).padStart(5, "0")}`);
+const forkedPlanId = (threadId: string, index: number): string =>
+  `${threadId}:fork-plan:${String(index).padStart(5, "0")}`;
+
+function activityRequestId(activity: OrchestrationThread["activities"][number]): string | null {
+  const payload =
+    activity.payload && typeof activity.payload === "object"
+      ? (activity.payload as Record<string, unknown>)
+      : null;
+  return typeof payload?.requestId === "string" ? payload.requestId : null;
+}
+
+function hasUnresolvedForkRequestActivity(
+  activities: ReadonlyArray<OrchestrationThread["activities"][number]>,
+): boolean {
+  const open = new Set<string>();
+  for (const activity of activities) {
+    const requestId = activityRequestId(activity);
+    if (!requestId) continue;
+    if (activity.kind === "approval.requested" || activity.kind === "user-input.requested") {
+      open.add(requestId);
+    } else if (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved") {
+      open.delete(requestId);
+    }
+  }
+  return open.size > 0;
+}
 
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
@@ -418,6 +450,37 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Thread '${command.sourceThreadId}' has streaming messages and cannot be forked yet.`,
         });
       }
+      if (
+        sourceThread.session?.status === "running" ||
+        sourceThread.latestTurn?.state === "running"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.sourceThreadId}' has a running turn and cannot be forked yet.`,
+        });
+      }
+      if (hasUnresolvedForkRequestActivity(sourceThread.activities)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.sourceThreadId}' has unresolved approval or user-input requests and cannot be forked yet.`,
+        });
+      }
+
+      const turnIds = new Map<string, TurnId>();
+      const forkTurnId = (turnId: TurnId | null): TurnId | null => {
+        if (turnId === null) return null;
+        const existing = turnIds.get(turnId);
+        if (existing) return existing;
+        const next = forkedTurnId(command.threadId, turnIds.size);
+        turnIds.set(turnId, next);
+        return next;
+      };
+      const messageIds = new Map(
+        sourceThread.messages.map((message, index) => [
+          message.id,
+          forkedMessageId(command.threadId, index),
+        ]),
+      );
 
       const threadCreatedEvent: PlannedOrchestrationEvent = {
         ...(yield* withEventBase({
@@ -454,14 +517,91 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               type: "thread.message-sent",
               payload: {
                 threadId: command.threadId,
-                messageId: forkedMessageId(command.threadId, index),
+                messageId: messageIds.get(message.id) ?? forkedMessageId(command.threadId, index),
                 role: message.role,
                 text: message.text,
                 ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
-                turnId: null,
+                turnId: forkTurnId(message.turnId),
                 streaming: false,
-                createdAt: command.createdAt,
-                updatedAt: command.createdAt,
+                createdAt: message.createdAt,
+                updatedAt: message.updatedAt,
+              },
+            } satisfies PlannedOrchestrationEvent;
+          }),
+        { concurrency: 1 },
+      );
+      const proposedPlanEvents: ReadonlyArray<PlannedOrchestrationEvent> = yield* Effect.forEach(
+        sourceThread.proposedPlans,
+        (proposedPlan, index) =>
+          Effect.gen(function* () {
+            return {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.proposed-plan-upserted",
+              payload: {
+                threadId: command.threadId,
+                proposedPlan: {
+                  ...proposedPlan,
+                  id: forkedPlanId(command.threadId, index),
+                  turnId: forkTurnId(proposedPlan.turnId),
+                  implementationThreadId:
+                    proposedPlan.implementationThreadId === command.sourceThreadId
+                      ? command.threadId
+                      : proposedPlan.implementationThreadId,
+                },
+              },
+            } satisfies PlannedOrchestrationEvent;
+          }),
+        { concurrency: 1 },
+      );
+      const checkpointEvents: ReadonlyArray<PlannedOrchestrationEvent> = yield* Effect.forEach(
+        sourceThread.checkpoints,
+        (checkpoint) =>
+          Effect.gen(function* () {
+            return {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.turn-diff-completed",
+              payload: {
+                ...checkpoint,
+                threadId: command.threadId,
+                turnId: forkTurnId(checkpoint.turnId) ?? checkpoint.turnId,
+                assistantMessageId:
+                  checkpoint.assistantMessageId === null
+                    ? null
+                    : (messageIds.get(checkpoint.assistantMessageId) ?? null),
+              },
+            } satisfies PlannedOrchestrationEvent;
+          }),
+        { concurrency: 1 },
+      );
+      const activityEvents: ReadonlyArray<PlannedOrchestrationEvent> = yield* Effect.forEach(
+        sourceThread.activities,
+        (activity, index) =>
+          Effect.gen(function* () {
+            return {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.activity-appended",
+              payload: {
+                threadId: command.threadId,
+                activity: {
+                  ...activity,
+                  id: forkedActivityId(command.threadId, index),
+                  turnId: forkTurnId(activity.turnId),
+                },
               },
             } satisfies PlannedOrchestrationEvent;
           }),
@@ -481,7 +621,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
-      return [threadCreatedEvent, ...messageEvents, forkRequestedEvent];
+      return [
+        threadCreatedEvent,
+        ...messageEvents,
+        ...proposedPlanEvents,
+        ...checkpointEvents,
+        ...activityEvents,
+        forkRequestedEvent,
+      ];
     }
 
     case "thread.turn.start": {
