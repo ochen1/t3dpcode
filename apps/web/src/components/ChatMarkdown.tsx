@@ -78,10 +78,13 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import {
   isBrowserPreviewFile,
+  isBrowserPreviewImageFile,
+  createWorkspaceFileAssetUrl,
   openFileInPreview,
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
+import { useAssetUrl } from "../assets/assetUrls";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -728,6 +731,17 @@ interface MarkdownFileLinkProps {
   className?: string | undefined;
 }
 
+interface MarkdownImageFilePreviewProps {
+  href: string;
+  targetPath: string;
+  imagePath: string;
+  displayPath: string;
+  copyMarkdown: string;
+  threadRef: ScopedThreadRef;
+  onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
+  className?: string | undefined;
+}
+
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
 const MARKDOWN_FILE_LINK_CLASS_NAME =
   "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
@@ -1207,6 +1221,122 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   );
 }, areMarkdownFileLinkPropsEqual);
 
+const MarkdownImageFilePreview = memo(function MarkdownImageFilePreview({
+  href,
+  targetPath,
+  imagePath,
+  displayPath,
+  copyMarkdown,
+  threadRef,
+  onOpenInBrowser,
+  className,
+}: MarkdownImageFilePreviewProps) {
+  const src = useAssetUrl(threadRef.environmentId, {
+    _tag: "workspace-file",
+    threadId: threadRef.threadId,
+    path: imagePath,
+  });
+  const [imageState, setImageState] = useState<"loading" | "loaded" | "error">("loading");
+
+  useEffect(() => {
+    setImageState("loading");
+  }, [src]);
+
+  const handleOpenFallback = useCallback(
+    (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      if (src) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!onOpenInBrowser) return;
+      void (async () => {
+        try {
+          const result = await onOpenInBrowser();
+          if (result._tag === "Success" || isAtomCommandInterrupted(result)) {
+            return;
+          }
+          reportMarkdownActionFailure(
+            { operation: "open-file-in-browser", target: targetPath },
+            result.cause,
+          );
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to open image",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        } catch (cause) {
+          reportMarkdownActionFailure(
+            { operation: "open-file-in-browser", target: targetPath },
+            cause,
+          );
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Unable to open image",
+              description: cause instanceof Error ? cause.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [onOpenInBrowser, src, targetPath],
+  );
+
+  return (
+    <span className={cn("my-2 block max-w-full", className)}>
+      <a
+        href={src ?? href}
+        target={src ? "_blank" : undefined}
+        rel={src ? "noopener noreferrer" : undefined}
+        className="group block w-fit max-w-full cursor-zoom-in overflow-hidden rounded-md border border-border/70 bg-background/70 text-foreground no-underline shadow-sm transition-colors hover:border-border hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
+        data-markdown-copy={copyMarkdown}
+        aria-label={`Preview ${displayPath}`}
+        title={displayPath}
+        onClick={handleOpenFallback}
+      >
+        {!src || imageState !== "loaded" ? (
+          <span className="flex min-h-32 max-w-full items-center justify-center px-4 py-3 text-center text-xs leading-snug text-muted-foreground/75">
+            {displayPath}
+          </span>
+        ) : null}
+        {src && imageState !== "error" ? (
+          <img
+            src={src}
+            alt={displayPath}
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            className={cn(
+              "block h-auto max-h-[min(72vh,640px)] max-w-full object-contain",
+              imageState === "loaded" ? "" : "max-h-0 opacity-0",
+            )}
+            onLoad={() => setImageState("loaded")}
+            onError={() => setImageState("error")}
+          />
+        ) : null}
+      </a>
+    </span>
+  );
+}, areMarkdownImageFilePreviewPropsEqual);
+
+function areMarkdownImageFilePreviewPropsEqual(
+  previous: Readonly<MarkdownImageFilePreviewProps>,
+  next: Readonly<MarkdownImageFilePreviewProps>,
+): boolean {
+  return (
+    previous.href === next.href &&
+    previous.targetPath === next.targetPath &&
+    previous.imagePath === next.imagePath &&
+    previous.displayPath === next.displayPath &&
+    previous.copyMarkdown === next.copyMarkdown &&
+    previous.threadRef === next.threadRef &&
+    previous.onOpenInBrowser === next.onOpenInBrowser &&
+    previous.className === next.className
+  );
+}
+
 function areMarkdownFileLinkPropsEqual(
   previous: Readonly<MarkdownFileLinkProps>,
   next: Readonly<MarkdownFileLinkProps>,
@@ -1315,6 +1445,29 @@ function ChatMarkdown({
             ),
           ),
         );
+      }
+      if (!isPreviewSupportedInRuntime()) {
+        const pendingWindow = window.open("about:blank", "_blank");
+        if (pendingWindow) {
+          pendingWindow.opener = null;
+        }
+        return createWorkspaceFileAssetUrl({
+          threadRef,
+          filePath: path,
+          httpBaseUrl: preparedConnection.value.httpBaseUrl,
+          createAssetUrl,
+        }).then((result) => {
+          if (result._tag === "Failure") {
+            pendingWindow?.close();
+            return AsyncResult.failure(result.cause);
+          }
+          if (pendingWindow) {
+            pendingWindow.location.href = result.value;
+          } else {
+            window.open(result.value, "_blank", "noopener,noreferrer");
+          }
+          return AsyncResult.success(undefined);
+        });
       }
       return openFileInPreview({
         threadRef,
@@ -1459,6 +1612,25 @@ function ChatMarkdown({
             `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
           );
         }
+        const openInBrowser =
+          threadRef && isBrowserPreviewFile(fileLinkMeta.filePath)
+            ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
+            : undefined;
+
+        if (threadRef && isBrowserPreviewImageFile(fileLinkMeta.filePath)) {
+          return (
+            <MarkdownImageFilePreview
+              href={fileLinkMeta.targetPath}
+              targetPath={fileLinkMeta.targetPath}
+              imagePath={fileLinkMeta.filePath}
+              displayPath={fileLinkMeta.displayPath}
+              copyMarkdown={`[${fileLinkMeta.basename}](${normalizedHref})`}
+              threadRef={threadRef}
+              onOpenInBrowser={openInBrowser}
+              className={props.className}
+            />
+          );
+        }
 
         return (
           <MarkdownFileLink
@@ -1473,13 +1645,7 @@ function ChatMarkdown({
             theme={resolvedTheme}
             threadRef={threadRef}
             onOpen={openInPreferredEditor}
-            onOpenInBrowser={
-              threadRef &&
-              isPreviewSupportedInRuntime() &&
-              isBrowserPreviewFile(fileLinkMeta.filePath)
-                ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
-                : undefined
-            }
+            onOpenInBrowser={openInBrowser}
             className={props.className}
           />
         );
