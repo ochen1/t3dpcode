@@ -68,6 +68,7 @@ export interface WorkLogEntry {
   detail?: string;
   command?: string;
   rawCommand?: string;
+  output?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
   toolTitle?: string;
@@ -216,6 +217,9 @@ export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean {
   }
   if (entry.command) {
     parts.push(entry.command);
+  }
+  if (entry.output) {
+    parts.push(entry.output);
   }
   const blob = parts.join("\n");
   if (blob.length === 0) {
@@ -680,6 +684,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       ? (activity.payload as Record<string, unknown>)
       : null;
   const commandPreview = extractToolCommand(payload);
+  const output = extractToolOutput(payload);
   const changedFiles = extractChangedFiles(payload);
   const title = extractToolTitle(payload);
   const isTaskActivity = activity.kind === "task.progress" || activity.kind === "task.completed";
@@ -719,7 +724,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   };
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
-  if (detail) {
+  if (
+    detail &&
+    !(commandPreview.command && isCommandSummaryDetail(payload, detail, commandPreview.command))
+  ) {
     entry.detail = detail;
   }
   if (commandPreview.command) {
@@ -727,6 +735,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (commandPreview.rawCommand) {
     entry.rawCommand = commandPreview.rawCommand;
+  }
+  if (output) {
+    entry.output = output;
   }
   if (changedFiles.length > 0) {
     entry.changedFiles = changedFiles;
@@ -811,6 +822,7 @@ function mergeDerivedWorkLogEntries(
   const detail = next.detail ?? previous.detail;
   const command = next.command ?? previous.command;
   const rawCommand = next.rawCommand ?? previous.rawCommand;
+  const output = next.output ?? previous.output;
   const toolTitle = next.toolTitle ?? previous.toolTitle;
   const itemType = next.itemType ?? previous.itemType;
   const requestKind = next.requestKind ?? previous.requestKind;
@@ -824,6 +836,7 @@ function mergeDerivedWorkLogEntries(
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
+    ...(output ? { output } : {}),
     ...(changedFiles.length > 0 ? { changedFiles } : {}),
     ...(toolTitle ? { toolTitle } : {}),
     ...(itemType ? { itemType } : {}),
@@ -855,11 +868,17 @@ function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | un
   }
   const normalizedLabel = normalizeCompactToolLabel(entry.toolTitle ?? entry.label);
   const detail = entry.detail?.trim() ?? "";
+  const output = entry.output?.trim() ?? "";
   const itemType = entry.itemType ?? "";
-  if (normalizedLabel.length === 0 && detail.length === 0 && itemType.length === 0) {
+  if (
+    normalizedLabel.length === 0 &&
+    detail.length === 0 &&
+    output.length === 0 &&
+    itemType.length === 0
+  ) {
     return undefined;
   }
-  return [itemType, normalizedLabel, detail].join("\u001f");
+  return [itemType, normalizedLabel, detail, output].join("\u001f");
 }
 
 function normalizeCompactToolLabel(value: string): string {
@@ -1050,13 +1069,18 @@ function extractToolCommand(payload: Record<string, unknown> | null): {
   const item = asRecord(data?.item);
   const itemResult = asRecord(item?.result);
   const itemInput = asRecord(item?.input);
+  const dataInput = asRecord(data?.input);
+  const rawInput = asRecord(data?.rawInput);
   const itemType = asTrimmedString(payload?.itemType);
   const detail = asTrimmedString(payload?.detail);
   const candidates: unknown[] = [
     item?.command,
     itemInput?.command,
     itemResult?.command,
+    dataInput?.command,
+    dataInput?.cmd,
     data?.command,
+    rawInput?.command,
     itemType === "command_execution" && detail ? stripTrailingExitCode(detail).output : null,
   ];
 
@@ -1123,6 +1147,101 @@ function summarizeToolTextOutput(value: string): string | null {
   return null;
 }
 
+function combineToolOutputParts(parts: ReadonlyArray<unknown>): string | null {
+  const normalized = parts.flatMap((part) => {
+    const text = asTrimmedString(part);
+    return text ? [text] : [];
+  });
+  return normalized.length > 0 ? normalized.join("\n") : null;
+}
+
+function extractTextOutput(value: unknown): string | null {
+  const direct = asTrimmedString(value);
+  if (direct) {
+    return direct;
+  }
+
+  if (Array.isArray(value)) {
+    return combineToolOutputParts(value.map((entry) => extractTextOutput(entry)));
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  return (
+    asTrimmedString(record.text) ??
+    asTrimmedString(record.output) ??
+    extractTextOutput(record.content)
+  );
+}
+
+function isCommandToolPayload(payload: Record<string, unknown> | null, heading?: string): boolean {
+  const data = asRecord(payload?.data);
+  const kind = asTrimmedString(data?.kind)?.toLowerCase();
+  const title = asTrimmedString(payload?.title ?? heading)?.toLowerCase();
+  const toolName = asTrimmedString(data?.toolName)?.toLowerCase();
+  return (
+    extractWorkLogItemType(payload) === "command_execution" ||
+    kind === "execute" ||
+    title === "terminal" ||
+    title === "ran command" ||
+    title === "command run" ||
+    toolName === "bash"
+  );
+}
+
+function isCommandSummaryDetail(
+  payload: Record<string, unknown> | null,
+  detail: string,
+  command: string,
+): boolean {
+  const normalizedDetail = normalizePreviewForComparison(stripTrailingExitCode(detail).output);
+  const normalizedCommand = normalizePreviewForComparison(command);
+  if (!normalizedDetail || !normalizedCommand) {
+    return false;
+  }
+  if (normalizedDetail === normalizedCommand) {
+    return true;
+  }
+
+  const data = asRecord(payload?.data);
+  const labels = [data?.toolName, payload?.title].flatMap((value) => {
+    const label = asTrimmedString(value);
+    return label ? [label] : [];
+  });
+  return labels.some((label) => {
+    const normalizedSummary = normalizePreviewForComparison(`${label}: ${command}`);
+    return normalizedSummary !== null && normalizedSummary === normalizedDetail;
+  });
+}
+
+function extractToolOutput(payload: Record<string, unknown> | null): string | null {
+  if (!isCommandToolPayload(payload)) {
+    return null;
+  }
+
+  const data = asRecord(payload?.data);
+  const item = asRecord(data?.item);
+  const itemResult = asRecord(item?.result);
+  const dataResult = asRecord(data?.result);
+  const rawOutput = asRecord(data?.rawOutput) ?? asRecord(item?.rawOutput);
+
+  return (
+    asTrimmedString(rawOutput?.output) ??
+    asTrimmedString(item?.aggregatedOutput) ??
+    combineToolOutputParts([rawOutput?.stdout, rawOutput?.stderr]) ??
+    asTrimmedString(data?.output) ??
+    asTrimmedString(item?.output) ??
+    combineToolOutputParts([data?.stdout, data?.stderr]) ??
+    combineToolOutputParts([item?.stdout, item?.stderr]) ??
+    combineToolOutputParts([itemResult?.stdout, itemResult?.stderr]) ??
+    extractTextOutput(dataResult?.content) ??
+    extractTextOutput(itemResult?.content)
+  );
+}
+
 function summarizeToolRawOutput(payload: Record<string, unknown> | null): string | null {
   const data = asRecord(payload?.data);
   const rawOutput = asRecord(data?.rawOutput);
@@ -1150,15 +1269,7 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
 }
 
 function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean {
-  const data = asRecord(payload?.data);
-  const kind = asTrimmedString(data?.kind)?.toLowerCase();
-  const title = asTrimmedString(payload?.title ?? heading)?.toLowerCase();
-  return (
-    extractWorkLogItemType(payload) === "command_execution" ||
-    kind === "execute" ||
-    title === "terminal" ||
-    title === "ran command"
-  );
+  return isCommandToolPayload(payload, heading);
 }
 
 function extractToolDetail(

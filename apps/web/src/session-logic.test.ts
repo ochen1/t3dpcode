@@ -897,6 +897,68 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("extracts completed Codex command output from aggregated output", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "codex-command-output",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "bun test",
+              aggregatedOutput: "PASS apps/web/src/session-logic.test.ts\n",
+              status: "completed",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry).toMatchObject({
+      command: "bun test",
+      output: "PASS apps/web/src/session-logic.test.ts",
+    });
+  });
+
+  it("extracts Claude command input and result output separately", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-command-output",
+        kind: "tool.completed",
+        summary: "Command run",
+        payload: {
+          itemType: "command_execution",
+          title: "Command run",
+          detail: "Bash: ls",
+          data: {
+            toolName: "Bash",
+            input: {
+              command: "ls",
+            },
+            result: {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: "apps\npackages\n",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry).toMatchObject({
+      label: "Command run",
+      command: "ls",
+      output: "apps\npackages",
+    });
+    expect(entry?.detail).toBeUndefined();
+  });
+
   it("extracts failed tool lifecycle status from item payloads", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1296,6 +1358,7 @@ describe("deriveWorkLogEntries", () => {
     });
     expect(entry?.detail).toBeUndefined();
     expect(entry?.command).toBeUndefined();
+    expect(entry?.output).toBe("total 960\napps\npackages");
   });
 
   it("collapses legacy completed tool rows that are missing tool metadata", () => {
