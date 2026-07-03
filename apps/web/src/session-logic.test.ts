@@ -897,6 +897,77 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
+  it("extracts image paths from Codex image view activities", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "codex-image-view",
+        kind: "tool.completed",
+        summary: "Image view",
+        payload: {
+          itemType: "image_view",
+          title: "Image view",
+          data: {
+            item: {
+              type: "imageView",
+              path: "assets/mockup.png",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.imagePath).toBe("assets/mockup.png");
+  });
+
+  it("extracts image paths from Claude Read file_path payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-read-image",
+        kind: "tool.completed",
+        summary: "Read file",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: 'Read: {"file_path":"assets/screenshot.webp"}',
+          data: {
+            toolName: "Read",
+            input: {
+              file_path: "assets/screenshot.webp",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.imagePath).toBe("assets/screenshot.webp");
+  });
+
+  it("does not expose non-image Read file paths as image previews", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-read-text",
+        kind: "tool.completed",
+        summary: "Read file",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Tool call",
+          detail: 'Read: {"file_path":"apps/web/src/App.tsx"}',
+          data: {
+            toolName: "Read",
+            input: {
+              file_path: "apps/web/src/App.tsx",
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities);
+    expect(entry?.imagePath).toBeUndefined();
+  });
+
   it("extracts completed Codex command output from aggregated output", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
