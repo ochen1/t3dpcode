@@ -50,6 +50,7 @@ function makeThread(
     checkpoints: [],
     session: null,
     ...input,
+    queuedTurns: input.queuedTurns ?? [],
   };
 }
 

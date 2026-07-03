@@ -2,6 +2,7 @@ import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3to
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
+  OrchestrationQueuedTurn,
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
@@ -21,6 +22,9 @@ import {
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
+  ThreadQueuedTurnEnqueuedPayload,
+  ThreadQueuedTurnRemovedPayload,
+  ThreadQueuedTurnSteerRequestedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
@@ -31,6 +35,7 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const MAX_THREAD_QUEUED_TURNS = 100;
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -178,6 +183,18 @@ function compareThreadActivities(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
+function compareQueuedTurns(left: OrchestrationQueuedTurn, right: OrchestrationQueuedTurn): number {
+  if (left.steerRequestedAt !== null || right.steerRequestedAt !== null) {
+    if (left.steerRequestedAt === null) return 1;
+    if (right.steerRequestedAt === null) return -1;
+    const steerOrder =
+      left.steerRequestedAt.localeCompare(right.steerRequestedAt) ||
+      left.id.localeCompare(right.id);
+    if (steerOrder !== 0) return steerOrder;
+  }
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
@@ -289,6 +306,7 @@ export function projectEvent(
             deletedAt: null,
             messages: [],
             activities: [],
+            queuedTurns: [],
             checkpoints: [],
             session: null,
           },
@@ -440,6 +458,96 @@ export function projectEvent(
           }),
         };
       });
+
+    case "thread.queued-turn-enqueued":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadQueuedTurnEnqueuedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (!thread) {
+          return nextBase;
+        }
+
+        const queuedTurn = yield* decodeForEvent(
+          OrchestrationQueuedTurn,
+          payload.queuedTurn,
+          event.type,
+          "queuedTurn",
+        );
+        const queuedTurns = [
+          ...thread.queuedTurns.filter((entry) => entry.id !== queuedTurn.id),
+          queuedTurn,
+        ]
+          .toSorted(compareQueuedTurns)
+          .slice(0, MAX_THREAD_QUEUED_TURNS);
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            queuedTurns,
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.queued-turn-removed":
+      return decodeForEvent(
+        ThreadQueuedTurnRemovedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns: thread.queuedTurns.filter((entry) => entry.id !== payload.queuedTurnId),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.queued-turn-steer-requested":
+      return decodeForEvent(
+        ThreadQueuedTurnSteerRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          const queuedTurns = thread.queuedTurns
+            .map((entry) =>
+              entry.id === payload.queuedTurnId
+                ? {
+                    ...entry,
+                    steerRequestedAt: payload.requestedAt,
+                    updatedAt: payload.requestedAt,
+                  }
+                : entry,
+            )
+            .toSorted(compareQueuedTurns);
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              queuedTurns,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
 
     case "thread.session-set":
       return Effect.gen(function* () {

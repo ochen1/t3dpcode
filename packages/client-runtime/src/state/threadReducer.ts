@@ -7,6 +7,7 @@ import type {
   OrchestrationEvent,
   OrchestrationLatestTurn,
   OrchestrationMessage,
+  OrchestrationQueuedTurn,
   OrchestrationSession,
   OrchestrationThread,
   OrchestrationThreadActivity,
@@ -34,6 +35,22 @@ const activityOrder = O.combineAll<OrchestrationThreadActivity>([
   O.mapInput(O.String, (a) => a.createdAt),
   O.mapInput(O.String, (a) => a.id),
 ]);
+
+function compareQueuedTurns(left: OrchestrationQueuedTurn, right: OrchestrationQueuedTurn): number {
+  const leftSteerRank = left.steerRequestedAt === null ? 1 : 0;
+  const rightSteerRank = right.steerRequestedAt === null ? 1 : 0;
+  if (leftSteerRank !== rightSteerRank) {
+    return leftSteerRank - rightSteerRank;
+  }
+
+  const leftSteerRequestedAt = left.steerRequestedAt ?? "";
+  const rightSteerRequestedAt = right.steerRequestedAt ?? "";
+  return (
+    leftSteerRequestedAt.localeCompare(rightSteerRequestedAt) ||
+    left.createdAt.localeCompare(right.createdAt) ||
+    left.id.localeCompare(right.id)
+  );
+}
 
 /**
  * Apply a single orchestration event to an `OrchestrationThread`, returning
@@ -74,6 +91,7 @@ export function applyThreadDetailEvent(
           archivedAt: null,
           deletedAt: null,
           messages: [],
+          queuedTurns: [],
           proposedPlans: [],
           activities: [],
           checkpoints: [],
@@ -271,6 +289,52 @@ export function applyThreadDetailEvent(
           latestTurn,
           updatedAt: event.occurredAt,
         },
+      };
+    }
+
+    // ── Queued turns ────────────────────────────────────────────────
+    case "thread.queued-turn-enqueued": {
+      const queuedTurns = pipe(
+        thread.queuedTurns,
+        Arr.filter((entry) => entry.id !== event.payload.queuedTurn.id),
+        Arr.append(event.payload.queuedTurn),
+        (items) => items.toSorted(compareQueuedTurns),
+      );
+
+      return {
+        kind: "updated",
+        thread: { ...thread, queuedTurns, updatedAt: event.occurredAt },
+      };
+    }
+
+    case "thread.queued-turn-removed":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          queuedTurns: thread.queuedTurns.filter(
+            (entry) => entry.id !== event.payload.queuedTurnId,
+          ),
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.queued-turn-steer-requested": {
+      const queuedTurns = thread.queuedTurns
+        .map((entry) =>
+          entry.id === event.payload.queuedTurnId
+            ? {
+                ...entry,
+                steerRequestedAt: event.payload.requestedAt,
+                updatedAt: event.payload.requestedAt,
+              }
+            : entry,
+        )
+        .toSorted(compareQueuedTurns);
+
+      return {
+        kind: "updated",
+        thread: { ...thread, queuedTurns, updatedAt: event.occurredAt },
       };
     }
 

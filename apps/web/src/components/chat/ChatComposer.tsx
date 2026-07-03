@@ -2,6 +2,7 @@ import type {
   ApprovalRequestId,
   EnvironmentId,
   ModelSelection,
+  OrchestrationQueuedTurn,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
   ProviderInteractionMode,
@@ -75,6 +76,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerQueuedHeader } from "./ComposerQueuedHeader";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -346,6 +348,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
+  canQueueWhileRunning: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -373,6 +376,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        canQueueWhileRunning={props.canQueueWhileRunning}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
@@ -439,6 +443,7 @@ export interface ChatComposerProps {
   activeThreadId: ThreadId | null;
   activeThreadEnvironmentId: EnvironmentId | undefined;
   activeThread: Thread | undefined;
+  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
 
@@ -507,6 +512,8 @@ export interface ChatComposerProps {
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
   onInterrupt: () => void;
+  onSteerQueuedTurn: (queuedTurn: OrchestrationQueuedTurn) => void;
+  onRemoveQueuedTurn: (queuedTurn: OrchestrationQueuedTurn) => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -550,6 +557,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
+    queuedTurns,
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     phase,
@@ -591,6 +599,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef,
     onSend,
     onInterrupt,
+    onSteerQueuedTurn,
+    onRemoveQueuedTurn,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -1044,7 +1054,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const isComposerApprovalState = activePendingApproval !== null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
+  const hasQueuedTurns = queuedTurns.length > 0;
   const hasComposerHeader =
+    hasQueuedTurns ||
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
@@ -1141,8 +1153,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : null,
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
+  const canQueueWhileRunning =
+    phase === "running" &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" || isSendBusy || isConnecting || !composerSendState.hasSendableContent;
+    isSendBusy || isConnecting || !composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionLabel = "Send message";
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null;
@@ -1698,7 +1715,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const shouldBlurMobileComposerOnSubmit = useCallback(() => {
     if (!isMobileViewport) return false;
-    if (isSendBusy || isConnecting || phase === "running") return false;
+    if (isSendBusy || isConnecting) return false;
     if (activePendingProgress) {
       return activePendingProgress.isLastQuestion && Boolean(activePendingResolvedAnswers);
     }
@@ -1710,7 +1727,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isMobileViewport,
     isSendBusy,
-    phase,
     showPlanFollowUpPrompt,
   ]);
 
@@ -2110,16 +2126,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             scheduleComposerCollapseCheck();
           }}
         >
+          {!isComposerCollapsedMobile && hasQueuedTurns ? (
+            <ComposerQueuedHeader
+              queuedTurns={queuedTurns}
+              onSteer={onSteerQueuedTurn}
+              onRemove={onRemoveQueuedTurn}
+            />
+          ) : null}
+
           {!isComposerCollapsedMobile &&
             (activePendingApproval ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <div
+                className={cn(
+                  "border-b border-border/65 bg-muted/20",
+                  !hasQueuedTurns && "rounded-t-[19px]",
+                )}
+              >
                 <ComposerPendingApprovalPanel
                   approval={activePendingApproval}
                   pendingCount={pendingApprovals.length}
                 />
               </div>
             ) : pendingUserInputs.length > 0 ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <div
+                className={cn(
+                  "border-b border-border/65 bg-muted/20",
+                  !hasQueuedTurns && "rounded-t-[19px]",
+                )}
+              >
                 <ComposerPendingUserInputPanel
                   pendingUserInputs={pendingUserInputs}
                   respondingRequestIds={respondingRequestIds}
@@ -2130,7 +2164,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <div
+                className={cn(
+                  "border-b border-border/65 bg-muted/20",
+                  !hasQueuedTurns && "rounded-t-[19px]",
+                )}
+              >
                 <ComposerPlanFollowUpBanner
                   key={activeProposedPlan.id}
                   planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
@@ -2203,6 +2242,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isEnvironmentUnavailable={environmentUnavailable !== null}
                       isPreparingWorktree={false}
                       hasSendableContent={false}
+                      canQueueWhileRunning={false}
                       preserveComposerFocusOnPointerDown
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                       onInterrupt={handleInterruptPrimaryAction}
@@ -2464,6 +2504,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isEnvironmentUnavailable={environmentUnavailable !== null}
                     isPreparingWorktree={false}
                     hasSendableContent={false}
+                    canQueueWhileRunning={false}
                     preserveComposerFocusOnPointerDown
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}
@@ -2575,6 +2616,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isEnvironmentUnavailable={environmentUnavailable !== null}
                   isPreparingWorktree={isPreparingWorktree}
                   hasSendableContent={composerSendState.hasSendableContent}
+                  canQueueWhileRunning={canQueueWhileRunning}
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}

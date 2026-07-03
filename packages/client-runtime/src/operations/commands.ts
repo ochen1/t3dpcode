@@ -40,6 +40,9 @@ export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type ForkThreadInput = CommandInput<"thread.fork">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
+export type EnqueueQueuedTurnInput = CommandInput<"thread.queued-turn.enqueue">;
+export type RemoveQueuedTurnInput = CommandInput<"thread.queued-turn.remove">;
+export type SteerQueuedTurnInput = CommandInput<"thread.queued-turn.steer">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
@@ -206,6 +209,42 @@ export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = E
   return yield* dispatch({
     ...input,
     type: "thread.turn.start",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const enqueueQueuedTurn: (input: EnqueueQueuedTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.enqueueQueuedTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.queued-turn.enqueue",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const removeQueuedTurn: (input: RemoveQueuedTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.removeQueuedTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.queued-turn.remove",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const steerQueuedTurn: (input: SteerQueuedTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.steerQueuedTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.queued-turn.steer",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });
