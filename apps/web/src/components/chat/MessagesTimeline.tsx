@@ -112,6 +112,7 @@ import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from "../../reviewCommentContext";
+import { useAssetUrl } from "../../assets/assetUrls";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -1797,10 +1798,11 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "imagePath" | "changedFiles">,
   workspaceRoot: string | undefined,
 ) {
   if (workEntry.command) return workEntry.command;
+  if (workEntry.imagePath) return formatWorkspaceRelativePath(workEntry.imagePath, workspaceRoot);
   if (workEntry.detail) return workEntry.detail;
   if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
   const [firstPath] = workEntry.changedFiles ?? [];
@@ -1838,6 +1840,9 @@ function buildToolCallExpandedBody(
   }
   const raw = workEntryRawCommand(workEntry);
   appendUniqueBlock(raw ?? workEntry.command);
+  appendUniqueBlock(
+    workEntry.imagePath ? formatWorkspaceRelativePath(workEntry.imagePath, workspaceRoot) : null,
+  );
   appendUniqueBlock(workEntry.detail);
   appendUniqueBlock(workEntry.output);
   const changedFiles = workEntry.changedFiles ?? [];
@@ -1862,6 +1867,7 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
   if (workEntry.requestKind === "file-read") return "eye";
   if (workEntry.requestKind === "file-change") return "square-pen";
 
+  if (workEntry.imagePath) return "eye";
   if (workEntry.itemType === "command_execution" || workEntry.command) {
     return "terminal";
   }
@@ -1897,6 +1903,76 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function WorkEntryImagePreview(props: { imagePath: string; workspaceRoot: string | undefined }) {
+  const ctx = use(TimelineRowCtx);
+  if (!ctx.threadRef) {
+    return null;
+  }
+  return (
+    <WorkEntryResolvedImagePreview
+      environmentId={ctx.activeThreadEnvironmentId}
+      threadId={ctx.threadRef.threadId}
+      imagePath={props.imagePath}
+      workspaceRoot={props.workspaceRoot}
+      onImageExpand={ctx.onImageExpand}
+    />
+  );
+}
+
+function WorkEntryResolvedImagePreview(props: {
+  environmentId: EnvironmentId;
+  threadId: ScopedThreadRef["threadId"];
+  imagePath: string;
+  workspaceRoot: string | undefined;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+}) {
+  const src = useAssetUrl(props.environmentId, {
+    _tag: "workspace-file",
+    threadId: props.threadId,
+    path: props.imagePath,
+  });
+  const displayPath = formatWorkspaceRelativePath(props.imagePath, props.workspaceRoot);
+  const [imageState, setImageState] = useState<"loading" | "loaded" | "error">("loading");
+
+  useEffect(() => {
+    setImageState("loading");
+  }, [src]);
+
+  if (!src || imageState === "error") {
+    return (
+      <div className="mb-2 flex min-h-20 max-w-full items-center justify-center rounded-md border border-border/60 bg-background/50 px-3 py-2 text-center text-[11px] leading-snug text-muted-foreground/70">
+        {displayPath}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="mb-2 block max-w-full cursor-zoom-in overflow-hidden rounded-md border border-border/60 bg-background/70"
+      aria-label={`Preview ${displayPath}`}
+      title={displayPath}
+      onClick={() => props.onImageExpand({ images: [{ src, name: displayPath }], index: 0 })}
+    >
+      {imageState !== "loaded" ? (
+        <div className="flex min-h-20 max-w-full items-center justify-center px-3 py-2 text-center text-[11px] leading-snug text-muted-foreground/70">
+          {displayPath}
+        </div>
+      ) : null}
+      <img
+        src={src}
+        alt={displayPath}
+        className={cn(
+          "block max-h-72 max-w-full object-contain",
+          imageState === "loaded" ? "" : "hidden",
+        )}
+        onLoad={() => setImageState("loaded")}
+        onError={() => setImageState("error")}
+      />
+    </button>
+  );
+}
+
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
@@ -1919,7 +1995,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       : rawPreview;
   const displayText = preview ? `${heading} - ${preview}` : heading;
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot);
-  const canExpand = expandedBody !== null;
+  const canExpand = expandedBody !== null || workEntry.imagePath !== undefined;
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
@@ -2043,15 +2119,20 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
           </div>
         </div>
       </div>
-      {expanded && canExpand && expandedBody ? (
+      {expanded && canExpand ? (
         <div
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
         >
-          <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
-            {expandedBody}
-          </pre>
+          {workEntry.imagePath ? (
+            <WorkEntryImagePreview imagePath={workEntry.imagePath} workspaceRoot={workspaceRoot} />
+          ) : null}
+          {expandedBody ? (
+            <pre className="max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground select-text">
+              {expandedBody}
+            </pre>
+          ) : null}
         </div>
       ) : null}
     </div>
