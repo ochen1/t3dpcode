@@ -1,4 +1,11 @@
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveX,
+  LoaderIcon,
+  PlusIcon,
+  RefreshCwIcon,
+  Volume2Icon,
+} from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
@@ -89,6 +96,7 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { playAgentCompletionSound, primeAgentCompletionSound } from "../../agentCompletionSound";
 
 const THEME_OPTIONS = [
   {
@@ -401,6 +409,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open task panel"]
         : []),
+      ...(settings.playSoundOnAgentCompletion !==
+      DEFAULT_UNIFIED_SETTINGS.playSoundOnAgentCompletion
+        ? ["Agent completion sound"]
+        : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
@@ -438,6 +450,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffIgnoreWhitespace,
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
+      settings.playSoundOnAgentCompletion,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
@@ -462,6 +475,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
+      playSoundOnAgentCompletion: DEFAULT_UNIFIED_SETTINGS.playSoundOnAgentCompletion,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
@@ -738,6 +752,48 @@ export function GeneralSettingsPanel() {
               }
               aria-label="Open the task panel automatically"
             />
+          }
+        />
+
+        <SettingsRow
+          title="Agent completion sound"
+          description="Play a short sound when an agent turn finishes successfully."
+          resetAction={
+            settings.playSoundOnAgentCompletion !==
+            DEFAULT_UNIFIED_SETTINGS.playSoundOnAgentCompletion ? (
+              <SettingResetButton
+                label="agent completion sound"
+                onClick={() =>
+                  updateSettings({
+                    playSoundOnAgentCompletion: DEFAULT_UNIFIED_SETTINGS.playSoundOnAgentCompletion,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => playAgentCompletionSound()}
+                aria-label="Test agent completion sound"
+              >
+                <Volume2Icon className="size-3.5" />
+                Test
+              </Button>
+              <Switch
+                checked={settings.playSoundOnAgentCompletion}
+                onCheckedChange={(checked) => {
+                  const enabled = Boolean(checked);
+                  updateSettings({ playSoundOnAgentCompletion: enabled });
+                  if (enabled) {
+                    primeAgentCompletionSound();
+                  }
+                }}
+                aria-label="Play a sound when an agent completes"
+              />
+            </>
           }
         />
 
