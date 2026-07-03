@@ -233,6 +233,7 @@ import {
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
+  threadHasStarted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -1011,6 +1012,7 @@ function ChatViewContent(props: ChatViewProps) {
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   });
+  const forkThread = useAtomCommand(threadEnvironment.fork, { reportFailure: false });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
@@ -3875,6 +3877,76 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
+  const onForkThread = async () => {
+    if (
+      !activeThread ||
+      !isServerThread ||
+      isSendBusy ||
+      isConnecting ||
+      activeEnvironmentUnavailable ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
+    if (!threadHasStarted(activeThread)) {
+      setThreadError(activeThread.id, "Send a message before forking this thread.");
+      return;
+    }
+
+    const sourceThreadId = activeThread.id;
+    const sourceEnvironmentId = activeThread.environmentId;
+    const targetThreadId = newThreadId();
+    const createdAt = new Date().toISOString();
+
+    sendInFlightRef.current = true;
+    try {
+      setThreadError(sourceThreadId, null);
+      const forkResult = await forkThread({
+        environmentId: sourceEnvironmentId,
+        input: {
+          sourceThreadId,
+          threadId: targetThreadId,
+          createdAt,
+        },
+      });
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        forkResult._tag === "Failure" ? forkResult : null;
+
+      if (failure === null) {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+        const startedResult = await settlePromise(() =>
+          waitForStartedServerThread(scopeThreadRef(sourceEnvironmentId, targetThreadId)),
+        );
+        failure = startedResult._tag === "Failure" ? startedResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: {
+              environmentId: sourceEnvironmentId,
+              threadId: targetThreadId,
+            },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null && !isAtomCommandInterrupted(failure)) {
+        const error = squashAtomCommandFailure(failure);
+        setThreadError(
+          sourceThreadId,
+          error instanceof Error ? error.message : "Failed to fork thread.",
+        );
+      }
+    } finally {
+      sendInFlightRef.current = false;
+    }
+  };
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     if (
@@ -3941,6 +4013,10 @@ function ChatViewContent(props: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
+      if (standaloneSlashCommand === "fork") {
+        await onForkThread();
+        return;
+      }
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);

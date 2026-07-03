@@ -131,6 +131,12 @@ export interface CodexThreadSnapshot {
   readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>;
 }
 
+export interface CodexThreadForkResult {
+  readonly providerThreadId: string;
+  readonly cwd: string;
+  readonly model: string;
+}
+
 export interface CodexSessionRuntimeShape {
   readonly start: () => Effect.Effect<ProviderSession, CodexSessionRuntimeError>;
   readonly getSession: Effect.Effect<ProviderSession>;
@@ -138,6 +144,7 @@ export interface CodexSessionRuntimeShape {
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
+  readonly forkThread: Effect.Effect<CodexThreadForkResult, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
     numTurns: number,
@@ -681,7 +688,10 @@ function updateSession(
 }
 
 function parseThreadSnapshot(
-  response: EffectCodexSchema.V2ThreadReadResponse | EffectCodexSchema.V2ThreadRollbackResponse,
+  response:
+    | EffectCodexSchema.V2ThreadReadResponse
+    | EffectCodexSchema.V2ThreadRollbackResponse
+    | EffectCodexSchema.V2ThreadForkResponse,
 ): CodexThreadSnapshot {
   return {
     threadId: response.thread.id,
@@ -1325,6 +1335,26 @@ export const makeCodexSessionRuntime = (
             turnId: effectiveTurnId,
           });
         }),
+      forkThread: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        const current = yield* Ref.get(sessionRef);
+        const normalizedModel = normalizeCodexModelSlug(current.model ?? options.model);
+        const config = runtimeModeToThreadConfig(current.runtimeMode);
+        const response = yield* client.request("thread/fork", {
+          threadId: providerThreadId,
+          cwd: current.cwd ?? options.cwd,
+          approvalPolicy: config.approvalPolicy,
+          sandbox: config.sandbox,
+          ...(normalizedModel ? { model: normalizedModel } : {}),
+          ...(options.serviceTier ? { serviceTier: options.serviceTier } : {}),
+          threadSource: "t3code",
+        });
+        return {
+          providerThreadId: response.thread.id,
+          cwd: response.cwd,
+          model: response.model,
+        };
+      }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;
         const response = yield* client.request("thread/read", {

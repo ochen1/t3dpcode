@@ -87,6 +87,14 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
   );
 
+  public readonly forkThreadImpl = vi.fn(() =>
+    Promise.resolve({
+      providerThreadId: "provider-thread-fork-1",
+      cwd: this.options.cwd,
+      model: this.options.model ?? "gpt-5-codex",
+    }),
+  );
+
   public readonly readThreadImpl = vi.fn(
     (): Promise<CodexThreadSnapshot> =>
       Promise.resolve({
@@ -134,6 +142,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
   }
+
+  forkThread = Effect.promise(() => this.forkThreadImpl());
 
   readThread = Effect.promise(() => this.readThreadImpl());
 

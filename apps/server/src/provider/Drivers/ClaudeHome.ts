@@ -18,6 +18,7 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   config: Pick<ClaudeSettings, "homePath">,
   baseEnv?: NodeJS.ProcessEnv,
 ): Effect.fn.Return<NodeJS.ProcessEnv, never, Path.Path> {
+  const path = yield* Path.Path;
   const resolvedBaseEnv = baseEnv ?? process.env;
   const homePath = config.homePath.trim();
   if (homePath.length === 0) return resolvedBaseEnv;
@@ -25,6 +26,7 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   return {
     ...resolvedBaseEnv,
     HOME: resolvedHomePath,
+    CLAUDE_CONFIG_DIR: resolvedBaseEnv.CLAUDE_CONFIG_DIR ?? path.join(resolvedHomePath, ".claude"),
   };
 });
 

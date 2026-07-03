@@ -49,6 +49,7 @@ type ProviderIntentEvent = Extract<
   {
     type:
       | "thread.runtime-mode-set"
+      | "thread.fork-requested"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
@@ -219,6 +220,7 @@ const make = Effect.gen(function* () {
     readonly kind:
       | "provider.turn.start.failed"
       | "provider.turn.interrupt.failed"
+      | "provider.thread.fork.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
       | "provider.session.stop.failed";
@@ -883,6 +885,54 @@ const make = Effect.gen(function* () {
     yield* providerService.interruptTurn({ threadId: event.payload.threadId });
   });
 
+  const processForkRequested = Effect.fn("processForkRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.fork-requested" }>,
+  ) {
+    const targetThread = yield* resolveThread(event.payload.threadId);
+    if (!targetThread) {
+      return;
+    }
+
+    const session = yield* providerService
+      .forkConversation({
+        sourceThreadId: event.payload.sourceThreadId,
+        targetThreadId: event.payload.threadId,
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.thread.fork.failed",
+            summary: "Provider thread fork failed",
+            detail: formatFailureDetail(cause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+          }).pipe(Effect.as(null)),
+        ),
+      );
+
+    if (session === null) {
+      return;
+    }
+
+    yield* setThreadSession({
+      threadId: event.payload.threadId,
+      session: {
+        threadId: event.payload.threadId,
+        status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+        providerName: session.provider,
+        ...(session.providerInstanceId !== undefined
+          ? { providerInstanceId: session.providerInstanceId }
+          : {}),
+        runtimeMode: session.runtimeMode,
+        activeTurnId: null,
+        lastError: session.lastError ?? null,
+        updatedAt: session.updatedAt,
+      },
+      createdAt: event.payload.createdAt,
+    });
+  });
+
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -1030,6 +1080,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
+      case "thread.fork-requested":
+        yield* processForkRequested(event);
+        return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
@@ -1064,6 +1117,7 @@ const make = Effect.gen(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
         event.type === "thread.runtime-mode-set" ||
+        event.type === "thread.fork-requested" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||

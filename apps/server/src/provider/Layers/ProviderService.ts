@@ -74,6 +74,11 @@ const ProviderRollbackConversationInput = Schema.Struct({
   numTurns: NonNegativeInt,
 });
 
+const ProviderForkConversationInput = Schema.Struct({
+  sourceThreadId: ThreadId,
+  targetThreadId: ThreadId,
+});
+
 function toValidationError(
   operation: string,
   issue: string,
@@ -1005,6 +1010,73 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const forkConversation: ProviderServiceMethod<"forkConversation"> = Effect.fn("forkConversation")(
+    function* (rawInput) {
+      const input = yield* decodeInputOrValidationError({
+        operation: "ProviderService.forkConversation",
+        schema: ProviderForkConversationInput,
+        payload: rawInput,
+      });
+      if (input.sourceThreadId === input.targetThreadId) {
+        return yield* toValidationError(
+          "ProviderService.forkConversation",
+          "sourceThreadId and targetThreadId must be different.",
+        );
+      }
+
+      let metricProvider = "unknown";
+      return yield* Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.sourceThreadId,
+          operation: "ProviderService.forkConversation",
+          allowRecovery: true,
+        });
+        metricProvider = routed.adapter.provider;
+        yield* Effect.annotateCurrentSpan({
+          "provider.operation": "fork-conversation",
+          "provider.kind": routed.adapter.provider,
+          "provider.source_thread_id": input.sourceThreadId,
+          "provider.target_thread_id": input.targetThreadId,
+        });
+
+        yield* prepareMcpSession(input.targetThreadId, routed.instanceId);
+        const session = yield* routed.adapter
+          .forkThread(routed.threadId, input.targetThreadId)
+          .pipe(Effect.onError(() => clearMcpSession(input.targetThreadId)));
+
+        if (session.provider !== routed.adapter.provider) {
+          yield* clearMcpSession(input.targetThreadId);
+          return yield* toValidationError(
+            "ProviderService.forkConversation",
+            `Adapter/provider mismatch while forking thread '${input.sourceThreadId}'. Expected '${routed.adapter.provider}', received '${session.provider}'.`,
+          );
+        }
+
+        const sessionWithInstance = {
+          ...session,
+          providerInstanceId: routed.instanceId,
+        };
+        yield* upsertSessionBinding(sessionWithInstance, input.targetThreadId, {
+          lastRuntimeEvent: "provider.forkConversation",
+          lastRuntimeEventAt: yield* nowIso,
+        });
+        yield* analytics.record("provider.conversation.forked", {
+          provider: sessionWithInstance.provider,
+          hasResumeCursor: sessionWithInstance.resumeCursor !== undefined,
+        });
+        return sessionWithInstance;
+      }).pipe(
+        withMetrics({
+          counter: providerSessionsTotal,
+          outcomeAttributes: () =>
+            providerMetricAttributes(metricProvider, {
+              operation: "fork",
+            }),
+        }),
+      );
+    },
+  );
+
   const runStopAll = Effect.fn("runStopAll")(function* () {
     const threadIds = yield* directory.listThreadIds();
     const currentAdapters = yield* getAdapterEntries;
@@ -1076,6 +1148,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getCapabilities,
     getInstanceInfo,
     rollbackConversation,
+    forkConversation,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

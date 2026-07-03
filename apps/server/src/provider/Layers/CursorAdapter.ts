@@ -1127,6 +1127,15 @@ export function makeCursorAdapter(
         return c !== undefined && !c.stopped;
       });
 
+    const forkThread: CursorAdapterShape["forkThread"] = (_sourceThreadId, _targetThreadId) =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "Cursor sessions do not support provider-side fork yet.",
+        }),
+      );
+
     const stopAll: CursorAdapterShape["stopAll"] = () =>
       Effect.forEach(sessions.values(), stopSessionInternal, { discard: true });
 
@@ -1148,6 +1157,7 @@ export function makeCursorAdapter(
       startSession,
       sendTurn,
       interruptTurn,
+      forkThread,
       readThread,
       rollbackThread,
       respondToRequest,

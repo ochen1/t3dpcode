@@ -488,6 +488,26 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
         sessions.clear();
       });
 
+    const forkThread: ProviderAdapterShape<ProviderAdapterError>["forkThread"] = (
+      sourceThreadId,
+      targetThreadId,
+    ) =>
+      Effect.gen(function* () {
+        const source = sessions.get(sourceThreadId);
+        if (!source) {
+          return yield* missingSessionEffect(provider, sourceThreadId);
+        }
+        const now = "2026-01-01T00:00:00.000Z";
+        const { activeTurnId: _activeTurnId, ...sourceSession } = source.session;
+        return {
+          ...sourceSession,
+          threadId: targetThreadId,
+          status: "ready" as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+      });
+
     const adapter: ProviderAdapterShape<ProviderAdapterError> = {
       provider,
       capabilities: {
@@ -501,6 +521,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       stopSession,
       listSessions,
       hasSession,
+      forkThread,
       readThread,
       rollbackThread,
       stopAll,

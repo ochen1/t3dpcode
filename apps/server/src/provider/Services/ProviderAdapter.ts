@@ -102,6 +102,14 @@ export interface ProviderAdapterShape<TError> {
   readonly hasSession: (threadId: ThreadId) => Effect.Effect<boolean>;
 
   /**
+   * Fork provider-native conversation state into a new T3 thread binding.
+   */
+  readonly forkThread: (
+    sourceThreadId: ThreadId,
+    targetThreadId: ThreadId,
+  ) => Effect.Effect<ProviderSession, TError>;
+
+  /**
    * Read a provider thread snapshot.
    */
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;

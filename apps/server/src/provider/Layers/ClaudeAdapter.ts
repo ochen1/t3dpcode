@@ -8,6 +8,7 @@
  */
 import {
   type CanUseTool,
+  forkSession,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -65,6 +66,7 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -1353,6 +1355,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           stream: "native",
         })
       : undefined);
+  const sessionMutationSemaphore = yield* Semaphore.make(1);
 
   const createQuery =
     options?.createQuery ??
@@ -1366,6 +1369,28 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }) as ClaudeQueryRuntime);
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
+  const runSessionMutation = <A>(threadId: ThreadId, method: string, operation: () => Promise<A>) =>
+    sessionMutationSemaphore.withPermit(
+      Effect.tryPromise({
+        try: async () => {
+          const nextConfigDir = claudeEnvironment.CLAUDE_CONFIG_DIR;
+          const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+          if (nextConfigDir !== undefined) {
+            process.env.CLAUDE_CONFIG_DIR = nextConfigDir;
+          }
+          try {
+            return await operation();
+          } finally {
+            if (previousConfigDir === undefined) {
+              delete process.env.CLAUDE_CONFIG_DIR;
+            } else {
+              process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+            }
+          }
+        },
+        catch: (cause) => toRequestError(threadId, method, cause),
+      }),
+    );
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -3743,6 +3768,53 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  const forkThread: ClaudeAdapterShape["forkThread"] = Effect.fn("forkThread")(
+    function* (sourceThreadId, targetThreadId) {
+      const context = yield* requireSession(sourceThreadId);
+      if (context.turnState !== undefined) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "Cannot fork a Claude session while a turn is running.",
+        });
+      }
+      const resumeSessionId = context.resumeSessionId;
+      if (!resumeSessionId) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "Claude session id is not initialized yet.",
+        });
+      }
+
+      const forked = yield* runSessionMutation(sourceThreadId, "session/fork", () =>
+        forkSession(resumeSessionId, {
+          ...(context.session.cwd !== undefined ? { dir: context.session.cwd } : {}),
+          ...(context.lastAssistantUuid !== undefined
+            ? { upToMessageId: context.lastAssistantUuid }
+            : {}),
+        }),
+      );
+      const now = yield* nowIso;
+      return {
+        provider: PROVIDER,
+        providerInstanceId: boundInstanceId,
+        status: "ready",
+        runtimeMode: context.session.runtimeMode,
+        ...(context.session.cwd !== undefined ? { cwd: context.session.cwd } : {}),
+        ...(context.session.model !== undefined ? { model: context.session.model } : {}),
+        threadId: targetThreadId,
+        resumeCursor: {
+          threadId: targetThreadId,
+          resume: forked.sessionId,
+          turnCount: context.turns.length,
+        },
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+  );
+
   const rollbackThread: ClaudeAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
     function* (threadId, numTurns) {
       const context = yield* requireSession(threadId);
@@ -3839,6 +3911,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    forkThread,
     readThread,
     rollbackThread,
     respondToRequest,

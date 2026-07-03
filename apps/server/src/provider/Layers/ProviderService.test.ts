@@ -194,6 +194,31 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.succeed({ threadId, turns: [] }),
   );
 
+  const forkThread = vi.fn(
+    (
+      sourceThreadId: ThreadId,
+      targetThreadId: ThreadId,
+    ): Effect.Effect<ProviderSession, ProviderAdapterError> =>
+      Effect.gen(function* () {
+        const source = sessions.get(sourceThreadId);
+        if (!source) {
+          return yield* new ProviderAdapterSessionNotFoundError({
+            provider,
+            threadId: sourceThreadId,
+          });
+        }
+        const now = "2026-01-01T00:00:00.000Z";
+        const { activeTurnId: _activeTurnId, ...sourceSession } = source;
+        return {
+          ...sourceSession,
+          threadId: targetThreadId,
+          status: "ready" as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+      }),
+  );
+
   const stopAll = vi.fn(
     (): Effect.Effect<void, ProviderAdapterError> =>
       Effect.sync(() => {
@@ -214,6 +239,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     stopSession,
     listSessions,
     hasSession,
+    forkThread,
     readThread,
     rollbackThread,
     stopAll,
@@ -249,6 +275,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     stopSession,
     listSessions,
     hasSession,
+    forkThread,
     readThread,
     rollbackThread,
     stopAll,

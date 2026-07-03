@@ -1412,6 +1412,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         return c !== undefined && !c.stopped;
       });
 
+    const forkThread: GrokAdapterShape["forkThread"] = (_sourceThreadId, _targetThreadId) =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "forkThread",
+          issue: "Grok ACP sessions do not support provider-side fork yet.",
+        }),
+      );
+
     const stopAll: GrokAdapterShape["stopAll"] = () =>
       Effect.forEach(Array.from(sessions.values()), stopSessionInternal, { discard: true });
 
@@ -1430,6 +1439,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       startSession,
       sendTurn,
       interruptTurn,
+      forkThread,
       readThread,
       rollbackThread,
       respondToRequest,

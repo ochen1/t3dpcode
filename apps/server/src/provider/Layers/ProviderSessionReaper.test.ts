@@ -172,6 +172,7 @@ describe("ProviderSessionReaper", () => {
         });
       },
       rollbackConversation: () => unsupported(),
+      forkConversation: () => unsupported(),
       streamEvents: Stream.empty,
     };
 

@@ -1,5 +1,6 @@
 import {
   EventId,
+  MessageId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -22,6 +23,9 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const forkedThreadTitle = (title: string): string => `${title} (fork)`;
+const forkedMessageId = (threadId: string, index: number): MessageId =>
+  MessageId.make(`${threadId}:fork-message:${String(index).padStart(5, "0")}`);
 
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
@@ -384,6 +388,100 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: occurredAt,
         },
       };
+    }
+
+    case "thread.fork": {
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: sourceThread.projectId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (sourceThread.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.sourceThreadId}' is deleted and cannot be forked.`,
+        });
+      }
+      if (sourceThread.messages.some((message) => message.streaming)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.sourceThreadId}' has streaming messages and cannot be forked yet.`,
+        });
+      }
+
+      const threadCreatedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: sourceThread.projectId,
+          title: command.title ?? forkedThreadTitle(sourceThread.title),
+          modelSelection: sourceThread.modelSelection,
+          runtimeMode: sourceThread.runtimeMode,
+          interactionMode: sourceThread.interactionMode,
+          branch: sourceThread.branch,
+          worktreePath: sourceThread.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+      const messageEvents: ReadonlyArray<PlannedOrchestrationEvent> = yield* Effect.forEach(
+        sourceThread.messages,
+        (message, index) =>
+          Effect.gen(function* () {
+            return {
+              ...(yield* withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              })),
+              type: "thread.message-sent",
+              payload: {
+                threadId: command.threadId,
+                messageId: forkedMessageId(command.threadId, index),
+                role: message.role,
+                text: message.text,
+                ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+                turnId: null,
+                streaming: false,
+                createdAt: command.createdAt,
+                updatedAt: command.createdAt,
+              },
+            } satisfies PlannedOrchestrationEvent;
+          }),
+        { concurrency: 1 },
+      );
+      const forkRequestedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.fork-requested",
+        payload: {
+          sourceThreadId: command.sourceThreadId,
+          threadId: command.threadId,
+          createdAt: command.createdAt,
+        },
+      };
+      return [threadCreatedEvent, ...messageEvents, forkRequestedEvent];
     }
 
     case "thread.turn.start": {

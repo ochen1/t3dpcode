@@ -106,6 +106,14 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Fork provider conversation state from one T3 thread into another.
+   */
+  readonly forkConversation: (input: {
+    readonly sourceThreadId: ThreadId;
+    readonly targetThreadId: ThreadId;
+  }) => Effect.Effect<ProviderSession, ProviderServiceError>;
+
+  /**
    * Canonical provider runtime event stream.
    *
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).

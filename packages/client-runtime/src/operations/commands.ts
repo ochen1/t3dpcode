@@ -38,6 +38,7 @@ export type UnarchiveThreadInput = CommandInput<"thread.unarchive">;
 export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
+export type ForkThreadInput = CommandInput<"thread.fork">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
@@ -185,6 +186,18 @@ export const setThreadInteractionMode: (input: SetThreadInteractionModeInput) =>
       createdAt: metadata.createdAt,
     });
   });
+
+export const forkThread: (input: ForkThreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.forkThread",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.fork",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
 
 export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.startThreadTurn",

@@ -26,6 +26,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -1548,6 +1549,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return session;
   });
 
+  const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.interruptTurn(turnId)),
@@ -1555,6 +1558,36 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
           : mapCodexRuntimeError(threadId, "turn/interrupt", cause),
+      ),
+    );
+
+  const forkThread: CodexAdapterShape["forkThread"] = (sourceThreadId, targetThreadId) =>
+    requireSession(sourceThreadId).pipe(
+      Effect.flatMap((session) =>
+        Effect.gen(function* () {
+          const sourceSession = yield* session.runtime.getSession;
+          const forked = yield* session.runtime.forkThread;
+          const now = yield* nowIso;
+          return {
+            provider: PROVIDER,
+            providerInstanceId: boundInstanceId,
+            status: "ready" as const,
+            runtimeMode: sourceSession.runtimeMode,
+            cwd: forked.cwd,
+            model: forked.model,
+            threadId: targetThreadId,
+            resumeCursor: {
+              threadId: forked.providerThreadId,
+            },
+            createdAt: now,
+            updatedAt: now,
+          };
+        }),
+      ),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(sourceThreadId, "thread/fork", cause),
       ),
     );
 
@@ -1682,6 +1715,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    forkThread,
     readThread,
     rollbackThread,
     respondToRequest,
