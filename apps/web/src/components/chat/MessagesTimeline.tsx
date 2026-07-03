@@ -1964,7 +1964,7 @@ function WorkEntryResolvedImagePreview(props: {
         alt={displayPath}
         className={cn(
           "block max-h-72 max-w-full object-contain",
-          imageState === "loaded" ? "" : "hidden",
+          imageState === "loaded" ? "" : "max-h-0 opacity-0",
         )}
         onLoad={() => setImageState("loaded")}
         onError={() => setImageState("error")}
