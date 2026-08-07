@@ -5,6 +5,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -88,6 +89,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
+import { activityPayloadContainsImagePath } from "./assets/toolImageAuthorization.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1853,32 +1855,33 @@ const makeWsRpcLayer = (
               if (input.resource._tag === "attachment") {
                 return yield* issueAssetUrl({ resource: input.resource });
               }
-              if (input.resource._tag === "project-favicon") {
+              const resource = input.resource;
+              if (resource._tag === "project-favicon") {
                 const project = yield* projectionSnapshotQuery
-                  .getActiveProjectByWorkspaceRoot(input.resource.cwd)
+                  .getActiveProjectByWorkspaceRoot(resource.cwd)
                   .pipe(
                     Effect.mapError(
                       (cause) =>
                         new AssetWorkspaceContextResolutionError({
-                          resource: input.resource,
+                          resource,
                           cause,
                         }),
                     ),
                   );
                 if (Option.isNone(project)) {
                   return yield* new AssetWorkspaceContextNotFoundError({
-                    resource: input.resource,
+                    resource,
                   });
                 }
                 return yield* issueAssetUrl({
-                  resource: input.resource,
+                  resource,
                   ...(project.value.faviconPath
                     ? { projectFaviconPath: project.value.faviconPath }
                     : {}),
                 });
               }
               const thread = yield* projectionSnapshotQuery
-                .getThreadShellById(input.resource.threadId)
+                .getThreadShellById(resource.threadId)
                 .pipe(
                   Effect.mapError(
                     (cause) =>
@@ -1909,9 +1912,39 @@ const makeWsRpcLayer = (
                   resource: input.resource,
                 });
               }
+              const path = yield* Path.Path;
+              let workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
+              if (path.isAbsolute(resource.path)) {
+                const relativePath = path.relative(workspaceRoot, resource.path);
+                const isOutsideWorkspace =
+                  relativePath === ".." ||
+                  relativePath.startsWith(`..${path.sep}`) ||
+                  path.isAbsolute(relativePath);
+                if (isOutsideWorkspace) {
+                  const detail = yield* projectionSnapshotQuery
+                    .getThreadDetailById(resource.threadId)
+                    .pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new AssetWorkspaceContextResolutionError({
+                            resource: input.resource,
+                            cause,
+                          }),
+                      ),
+                    );
+                  const isToolImage =
+                    Option.isSome(detail) &&
+                    detail.value.activities.some((activity) =>
+                      activityPayloadContainsImagePath(activity.payload, resource.path),
+                    );
+                  if (isToolImage) {
+                    workspaceRoot = path.dirname(resource.path);
+                  }
+                }
+              }
               return yield* issueAssetUrl({
                 resource: input.resource,
-                workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
+                workspaceRoot,
               });
             }),
             { "rpc.aggregate": "workspace" },
