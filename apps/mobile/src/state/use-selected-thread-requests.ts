@@ -177,6 +177,19 @@ export function useSelectedThreadRequests() {
     selectedThreadShell,
   ]);
 
+  const onCancelUserInput = useCallback(async () => {
+    if (!selectedThreadShell || !activePendingUserInput) return;
+
+    return respondToUserInput({
+      environmentId: selectedThreadShell.environmentId,
+      input: {
+        threadId: selectedThreadShell.id,
+        requestId: activePendingUserInput.requestId,
+        answers: {},
+      },
+    });
+  }, [activePendingUserInput, respondToUserInput, selectedThreadShell]);
+
   return {
     activePendingApproval,
     activePendingUserInput,
@@ -188,5 +201,6 @@ export function useSelectedThreadRequests() {
     onSelectUserInputOption,
     onChangeUserInputCustomAnswer,
     onSubmitUserInput,
+    onCancelUserInput,
   };
 }

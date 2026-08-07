@@ -50,6 +50,7 @@ function makeReadModel(input: {
         snoozedUntil: input.snoozedUntil ?? null,
         snoozedAt: input.snoozedAt ?? (input.snoozedUntil != null ? SNOOZED_AT : null),
         deletedAt: null,
+        queuedTurns: [],
         messages: input.messages ?? [],
         proposedPlans: [],
         activities: input.activities ?? [],

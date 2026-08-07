@@ -192,9 +192,11 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
 
   if (Result.isFailure(versionResult)) {
     const error = versionResult.failure;
-    yield* Effect.logWarning("Grok CLI health check failed.", {
-      errorTag: error._tag,
-    });
+    if (!isCommandMissingCause(error)) {
+      yield* Effect.logWarning("Grok CLI health check failed.", {
+        errorTag: error._tag,
+      });
+    }
     return buildServerProvider({
       presentation: GROK_PRESENTATION,
       enabled: grokSettings.enabled,

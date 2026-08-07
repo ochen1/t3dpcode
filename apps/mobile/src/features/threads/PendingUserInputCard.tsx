@@ -67,6 +67,7 @@ export interface PendingUserInputCardProps {
     customAnswer: string,
   ) => void;
   readonly onSubmit: () => Promise<unknown>;
+  readonly onCancel: () => void;
 }
 
 /**
@@ -305,18 +306,33 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           );
         })}
       </ScrollView>
-      <Pressable
-        className={cn(
-          "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
-        )}
-        disabled={
-          props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
-        }
-        onPress={() => void props.onSubmit()}
-      >
-        <Text className="font-t3-extrabold text-sm text-white">Submit answers</Text>
-      </Pressable>
+      <View className="flex-row gap-2.5">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cancel input and stop generation"
+          className="items-center justify-center rounded-2xl border border-neutral-300 bg-white px-4 py-3.5 dark:border-white/10 dark:bg-neutral-950/70"
+          disabled={props.respondingUserInputId === props.pendingUserInput.requestId}
+          onPress={props.onCancel}
+        >
+          <Text className="font-t3-extrabold text-sm text-neutral-700 dark:text-neutral-200">
+            Cancel
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          className={cn(
+            "flex-1 items-center justify-center rounded-2xl px-4 py-3.5",
+            props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
+          )}
+          disabled={
+            props.answers === null ||
+            props.respondingUserInputId === props.pendingUserInput.requestId
+          }
+          onPress={() => void props.onSubmit()}
+        >
+          <Text className="font-t3-extrabold text-sm text-white">Submit answers</Text>
+        </Pressable>
+      </View>
     </Animated.View>
   ) : null;
   return (

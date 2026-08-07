@@ -89,6 +89,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: "default",
     session: null,
     messages: [],
+    queuedTurns: [],
     proposedPlans: [],
     activities: [],
     checkpoints: [],

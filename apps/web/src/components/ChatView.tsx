@@ -9,6 +9,8 @@ import {
   type ProjectId,
   type ProviderApprovalDecision,
   type PreviewAnnotationPayload,
+  type OrchestrationQueuedTurn,
+  QueuedTurnId,
   ProviderInstanceId,
   type ServerProvider,
   type ResolvedKeybindingsConfig,
@@ -166,7 +168,7 @@ import {
   GitBranchIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { cn, randomHex } from "~/lib/utils";
+import { cn, randomHex, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -1225,6 +1227,15 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const enqueueQueuedTurn = useAtomCommand(threadEnvironment.enqueueQueuedTurn, {
+    reportFailure: false,
+  });
+  const removeQueuedTurn = useAtomCommand(threadEnvironment.removeQueuedTurn, {
+    reportFailure: false,
+  });
+  const steerQueuedTurn = useAtomCommand(threadEnvironment.steerQueuedTurn, {
+    reportFailure: false,
+  });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -5066,7 +5077,6 @@ function ChatViewContent(props: ChatViewProps) {
       await dockStarted;
     }
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
-
     const composerImagesSnapshot = [...composerImages];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const composerElementContextsSnapshot = [...composerElementContexts];
@@ -5110,6 +5120,103 @@ function ChatViewContent(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
+    let firstComposerImageName: string | null = null;
+    if (composerImagesSnapshot.length > 0) {
+      const firstComposerImage = composerImagesSnapshot[0];
+      if (firstComposerImage) {
+        firstComposerImageName = firstComposerImage.name;
+      }
+    }
+    let titleSeed = trimmed;
+    if (!titleSeed) {
+      if (firstComposerImageName) {
+        titleSeed = `Image: ${firstComposerImageName}`;
+      } else if (composerTerminalContextsSnapshot.length > 0) {
+        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
+      } else if (composerElementContextsSnapshot.length > 0) {
+        titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
+      } else {
+        titleSeed = "New thread";
+      }
+    }
+    const title = truncate(titleSeed);
+    const threadCreateModelSelection = createModelSelection(
+      ctxSelectedModelSelection.instanceId,
+      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModelSelection.options,
+    );
+    const shouldQueueTurn = phase === "running" && isServerThread && !isLocalDraftThread;
+    if (shouldQueueTurn) {
+      sendInFlightRef.current = true;
+      try {
+        setThreadError(threadIdForSend, null);
+        if (expiredTerminalContextCount > 0) {
+          const toastCopy = buildExpiredTerminalContextToastCopy(
+            expiredTerminalContextCount,
+            "omitted",
+          );
+          toastManager.add(
+            stackedThreadToast({
+              type: "warning",
+              title: toastCopy.title,
+              description: toastCopy.description,
+            }),
+          );
+        }
+
+        let failure: AtomCommandResult<unknown, unknown> | null = null;
+        const turnAttachmentsResult = await settlePromise(() => turnAttachmentsPromise);
+        if (turnAttachmentsResult._tag === "Failure") {
+          failure = turnAttachmentsResult;
+        }
+
+        if (failure === null && turnAttachmentsResult._tag === "Success") {
+          const enqueueResult = await enqueueQueuedTurn({
+            environmentId,
+            input: {
+              threadId: threadIdForSend,
+              queuedTurnId: QueuedTurnId.make(randomUUID()),
+              message: {
+                messageId: messageIdForSend,
+                role: "user",
+                text: outgoingMessageText,
+                attachments: turnAttachmentsResult.value,
+              },
+              modelSelection: ctxSelectedModelSelection,
+              titleSeed: title,
+              runtimeMode,
+              interactionMode,
+              createdAt: messageCreatedAt,
+            },
+          });
+          if (enqueueResult._tag === "Failure") {
+            failure = enqueueResult;
+          }
+        }
+
+        if (failure !== null) {
+          if (!isAtomCommandInterrupted(failure)) {
+            const error = squashAtomCommandFailure(failure);
+            setThreadError(
+              threadIdForSend,
+              error instanceof Error ? error.message : "Failed to queue message.",
+            );
+          }
+          return;
+        }
+
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      } finally {
+        sendInFlightRef.current = false;
+      }
+      return;
+    }
+
+    sendInFlightRef.current = true;
+    beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
@@ -5155,32 +5262,6 @@ function ChatViewContent(props: ChatViewProps) {
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
     composerRef.current?.resetCursorState();
-
-    let firstComposerImageName: string | null = null;
-    if (composerImagesSnapshot.length > 0) {
-      const firstComposerImage = composerImagesSnapshot[0];
-      if (firstComposerImage) {
-        firstComposerImageName = firstComposerImage.name;
-      }
-    }
-    let titleSeed = trimmed;
-    if (!titleSeed) {
-      if (firstComposerImageName) {
-        titleSeed = `Image: ${firstComposerImageName}`;
-      } else if (composerTerminalContextsSnapshot.length > 0) {
-        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
-      } else if (composerElementContextsSnapshot.length > 0) {
-        titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
-      } else {
-        titleSeed = "New thread";
-      }
-    }
-    const title = truncate(titleSeed);
-    const threadCreateModelSelection = createModelSelection(
-      ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
-      ctxSelectedModelSelection.options,
-    );
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
     // Auto-title from first message
@@ -5345,6 +5426,46 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
+  const onRemoveQueuedTurn = useCallback(
+    async (queuedTurn: OrchestrationQueuedTurn) => {
+      const result = await removeQueuedTurn({
+        environmentId,
+        input: {
+          threadId: queuedTurn.threadId,
+          queuedTurnId: queuedTurn.id,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          queuedTurn.threadId,
+          error instanceof Error ? error.message : "Failed to remove queued message.",
+        );
+      }
+    },
+    [environmentId, removeQueuedTurn, setThreadError],
+  );
+
+  const onSteerQueuedTurn = useCallback(
+    async (queuedTurn: OrchestrationQueuedTurn) => {
+      const result = await steerQueuedTurn({
+        environmentId,
+        input: {
+          threadId: queuedTurn.threadId,
+          queuedTurnId: queuedTurn.id,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          queuedTurn.threadId,
+          error instanceof Error ? error.message : "Failed to steer queued message.",
+        );
+      }
+    },
+    [environmentId, setThreadError, steerQueuedTurn],
+  );
+
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
       if (!activeThreadId) return;
@@ -5400,6 +5521,22 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThreadId, environmentId, respondToThreadUserInput, setThreadError],
   );
+
+  const onCancelPendingUserInput = useCallback(async () => {
+    if (!activeThread || !activePendingUserInput) return;
+
+    await interruptThreadTurn({
+      environmentId,
+      input: buildThreadTurnInterruptInput(activeThread),
+    });
+    await onRespondToUserInput(activePendingUserInput.requestId, {});
+  }, [
+    activePendingUserInput,
+    activeThread,
+    environmentId,
+    interruptThreadTurn,
+    onRespondToUserInput,
+  ]);
 
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
@@ -6355,6 +6492,7 @@ function ChatViewContent(props: ChatViewProps) {
                             activeThreadId={activeThreadId}
                             activeThreadEnvironmentId={activeThread?.environmentId}
                             activeThread={activeThread}
+                            queuedTurns={activeThread?.queuedTurns ?? []}
                             isServerThread={isServerThread}
                             isLocalDraftThread={isLocalDraftThread}
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
@@ -6396,6 +6534,9 @@ function ChatViewContent(props: ChatViewProps) {
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
+                            onCancelPendingUserInput={onCancelPendingUserInput}
+                            onSteerQueuedTurn={onSteerQueuedTurn}
+                            onRemoveQueuedTurn={onRemoveQueuedTurn}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={

@@ -13,6 +13,20 @@ import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 
+export function providerResumeCommand(
+  providerName: string | null | undefined,
+  providerThreadId: string | undefined,
+): { command: string; providerLabel: "Claude" | "Codex" } | null {
+  if (!providerThreadId || !/^[A-Za-z0-9_-]+$/.test(providerThreadId)) return null;
+  if (providerName === "claudeAgent") {
+    return { command: `claude --resume ${providerThreadId}`, providerLabel: "Claude" };
+  }
+  if (providerName === "codex") {
+    return { command: `codex resume ${providerThreadId}`, providerLabel: "Codex" };
+  }
+  return null;
+}
+
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 // Visible sidebar rows are prewarmed into the thread-detail cache so opening a

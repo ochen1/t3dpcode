@@ -113,6 +113,18 @@ describe("ClientSettings sidebar", () => {
   });
 });
 
+describe("ClientSettings agent completion sound", () => {
+  it("defaults audible completion notifications off", () => {
+    expect(decodeClientSettings({}).playSoundOnAgentCompletion).toBe(false);
+  });
+
+  it("accepts audible completion notification updates", () => {
+    expect(
+      decodeClientSettingsPatch({ playSoundOnAgentCompletion: true }).playSoundOnAgentCompletion,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults text generation to Luna at low reasoning effort", () => {
     expect(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection).toEqual({

@@ -17,6 +17,9 @@ import {
   ThreadUnpinnedPayload as ContractsThreadUnpinnedPayloadSchema,
   ThreadPinReorderedPayload as ContractsThreadPinReorderedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
+  ThreadQueuedTurnEnqueuedPayload as ContractsThreadQueuedTurnEnqueuedPayloadSchema,
+  ThreadQueuedTurnRemovedPayload as ContractsThreadQueuedTurnRemovedPayloadSchema,
+  ThreadQueuedTurnSteerRequestedPayload as ContractsThreadQueuedTurnSteerRequestedPayloadSchema,
   ThreadProposedPlanUpsertedPayload as ContractsThreadProposedPlanUpsertedPayloadSchema,
   ThreadSessionSetPayload as ContractsThreadSessionSetPayloadSchema,
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
@@ -50,6 +53,10 @@ export const ThreadUnpinnedPayload = ContractsThreadUnpinnedPayloadSchema;
 export const ThreadPinReorderedPayload = ContractsThreadPinReorderedPayloadSchema;
 
 export const MessageSentPayloadSchema = ContractsThreadMessageSentPayloadSchema;
+export const ThreadQueuedTurnEnqueuedPayload = ContractsThreadQueuedTurnEnqueuedPayloadSchema;
+export const ThreadQueuedTurnRemovedPayload = ContractsThreadQueuedTurnRemovedPayloadSchema;
+export const ThreadQueuedTurnSteerRequestedPayload =
+  ContractsThreadQueuedTurnSteerRequestedPayloadSchema;
 export const ThreadProposedPlanUpsertedPayload = ContractsThreadProposedPlanUpsertedPayloadSchema;
 export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
 export const ThreadTurnDiffCompletedPayload = ContractsThreadTurnDiffCompletedPayloadSchema;

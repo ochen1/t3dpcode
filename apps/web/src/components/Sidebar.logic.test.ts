@@ -3,6 +3,7 @@ import {
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  providerResumeCommand,
   createThreadJumpHintVisibilityController,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
@@ -36,6 +37,7 @@ import {
   shouldCreateNewThreadInCurrentProject,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
+
 import {
   EnvironmentId,
   OrchestrationLatestTurn,
@@ -52,6 +54,25 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("providerResumeCommand", () => {
+  it("builds resumable Claude and Codex CLI commands", () => {
+    expect(providerResumeCommand("claudeAgent", "b6b0f35a-6998-4da6-a95a-271a4b735cbc")).toEqual({
+      command: "claude --resume b6b0f35a-6998-4da6-a95a-271a4b735cbc",
+      providerLabel: "Claude",
+    });
+    expect(providerResumeCommand("codex", "019cea39-5785-7f21-b9c0-140c828cf0e5")).toEqual({
+      command: "codex resume 019cea39-5785-7f21-b9c0-140c828cf0e5",
+      providerLabel: "Codex",
+    });
+  });
+
+  it("rejects unsupported providers and missing or shell-unsafe session ids", () => {
+    expect(providerResumeCommand("codex", undefined)).toBeNull();
+    expect(providerResumeCommand("codex", "session; rm -rf nope")).toBeNull();
+    expect(providerResumeCommand("cursor", "safe-session-id")).toBeNull();
+  });
+});
 
 describe("shouldNavigateAfterProjectRemoval", () => {
   const projectThreads = [{ environmentId: "environment-local", id: "thread-1" }];
@@ -1307,6 +1328,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
     messages: [],
+    queuedTurns: [],
     proposedPlans: [],
     createdAt: "2026-03-09T10:00:00.000Z",
     archivedAt: null,

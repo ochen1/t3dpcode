@@ -481,7 +481,8 @@ function ThreadRouteContent(
   const handleStopThread = useCallback(() => {
     if (
       !selectedThread ||
-      (selectedThread.session?.status !== "running" &&
+      (requests.activePendingUserInput === null &&
+        selectedThread.session?.status !== "running" &&
         selectedThread.session?.status !== "starting")
     ) {
       return;
@@ -490,12 +491,17 @@ function ThreadRouteContent(
       environmentId: selectedThread.environmentId,
       input: {
         threadId: selectedThread.id,
-        ...(selectedThread.session.activeTurnId
+        ...(selectedThread.session?.activeTurnId
           ? { turnId: selectedThread.session.activeTurnId }
           : {}),
       },
     });
-  }, [interruptThreadTurn, selectedThread]);
+  }, [interruptThreadTurn, requests.activePendingUserInput, selectedThread]);
+
+  const handleCancelUserInput = useCallback(async () => {
+    await handleStopThread();
+    await requests.onCancelUserInput();
+  }, [handleStopThread, requests]);
 
   const handleOpenTerminal = useCallback(
     (nextTerminalId?: string | null) => {
@@ -807,6 +813,7 @@ function ThreadRouteContent(
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
           onSubmitUserInput={requests.onSubmitUserInput}
+          onCancelUserInput={() => void handleCancelUserInput()}
         />
       </View>
     </>
