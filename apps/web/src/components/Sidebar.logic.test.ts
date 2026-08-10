@@ -34,7 +34,7 @@ import {
   sortThreadsForSidebar,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
-  shouldCreateNewThreadInCurrentProject,
+  shouldOpenNewThreadProjectPicker,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 
@@ -54,6 +54,23 @@ import {
 } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("shouldOpenNewThreadProjectPicker", () => {
+  it("creates directly when a thread or draft already identifies the project", () => {
+    expect(
+      shouldOpenNewThreadProjectPicker({ projectGroupCount: 8, hasActiveThreadContext: true }),
+    ).toBe(false);
+  });
+
+  it("asks for a project only from an unscoped multi-project surface", () => {
+    expect(
+      shouldOpenNewThreadProjectPicker({ projectGroupCount: 8, hasActiveThreadContext: false }),
+    ).toBe(true);
+    expect(
+      shouldOpenNewThreadProjectPicker({ projectGroupCount: 1, hasActiveThreadContext: false }),
+    ).toBe(false);
+  });
+});
 
 describe("providerResumeCommand", () => {
   it("builds resumable Claude and Codex CLI commands", () => {

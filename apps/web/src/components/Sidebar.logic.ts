@@ -37,6 +37,13 @@ export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 // it small; cold opens still render instantly from the cached snapshot.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 
+export function shouldOpenNewThreadProjectPicker(input: {
+  projectGroupCount: number;
+  hasActiveThreadContext: boolean;
+}): boolean {
+  return input.projectGroupCount > 1 && !input.hasActiveThreadContext;
+}
+
 type SidebarProject = {
   id: string;
   title: string;
