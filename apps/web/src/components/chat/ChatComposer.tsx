@@ -94,7 +94,7 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
-import { ComposerQueuedHeader } from "./ComposerQueuedHeader";
+import { ComposerQueuedHeader, shouldShowComposerQueuedHeader } from "./ComposerQueuedHeader";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
@@ -2715,7 +2715,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             scheduleComposerCollapseCheck();
           }}
         >
-          {!isComposerCollapsedMobile && hasQueuedTurns ? (
+          {shouldShowComposerQueuedHeader({
+            queuedTurnCount: queuedTurns.length,
+            isComposerCollapsedMobile,
+          }) ? (
             <ComposerQueuedHeader
               queuedTurns={queuedTurns}
               onSteer={onSteerQueuedTurn}

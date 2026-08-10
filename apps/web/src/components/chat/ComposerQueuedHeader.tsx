@@ -5,6 +5,13 @@ import { memo } from "react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
+export function shouldShowComposerQueuedHeader(input: {
+  readonly queuedTurnCount: number;
+  readonly isComposerCollapsedMobile: boolean;
+}): boolean {
+  return input.queuedTurnCount > 0;
+}
+
 function previewQueuedText(text: string): string {
   const normalized = text
     .replace(/```[\s\S]*?```/g, "code block")

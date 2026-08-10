@@ -27,6 +27,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  QueuedTurnId,
   ResolvedKeybindingRule,
   ThreadId,
   WS_METHODS,
@@ -6093,13 +6094,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
-  it.effect("buffers thread events published while the initial snapshot loads", () =>
+  it.effect("delivers queued turns published while the initial thread snapshot loads", () =>
     Effect.gen(function* () {
       const thread = makeDefaultOrchestrationReadModel().threads[0]!;
       const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
-      const messageEvent = {
+      const queuedTurnEvent = {
         sequence: 2,
-        eventId: EventId.make("event-message"),
+        eventId: EventId.make("event-queued-turn"),
         aggregateKind: "thread",
         aggregateId: defaultThreadId,
         occurredAt: "2026-01-01T00:00:01.000Z",
@@ -6107,18 +6108,27 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         causationEventId: null,
         correlationId: null,
         metadata: {},
-        type: "thread.message-sent",
+        type: "thread.queued-turn-enqueued",
         payload: {
           threadId: defaultThreadId,
-          messageId: MessageId.make("message-1"),
-          role: "user",
-          text: "First message",
-          turnId: null,
-          streaming: false,
-          createdAt: "2026-01-01T00:00:01.000Z",
-          updatedAt: "2026-01-01T00:00:01.000Z",
+          queuedTurn: {
+            id: QueuedTurnId.make("queued-turn-1"),
+            threadId: defaultThreadId,
+            message: {
+              messageId: MessageId.make("message-1"),
+              role: "user",
+              text: "Queued message",
+              attachments: [],
+            },
+            modelSelection: thread.modelSelection,
+            runtimeMode: thread.runtimeMode,
+            interactionMode: thread.interactionMode,
+            steerRequestedAt: null,
+            createdAt: "2026-01-01T00:00:01.000Z",
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
         },
-      } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
+      } satisfies Extract<OrchestrationEvent, { type: "thread.queued-turn-enqueued" }>;
 
       yield* buildAppUnderTest({
         layers: {
@@ -6129,7 +6139,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             getThreadDetailSnapshot: () =>
               Effect.gen(function* () {
                 yield* Effect.sleep("25 millis");
-                yield* PubSub.publish(liveEvents, messageEvent);
+                yield* PubSub.publish(liveEvents, queuedTurnEvent);
                 return Option.some({ snapshotSequence: 1, thread });
               }),
           },
@@ -6147,7 +6157,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(items[0]?.kind, "snapshot");
       assert.equal(items[1]?.kind, "event");
-      assert.equal(items[1]?.kind === "event" ? items[1].event.sequence : null, 2);
+      assert.equal(
+        items[1]?.kind === "event" ? items[1].event.type : null,
+        "thread.queued-turn-enqueued",
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 
