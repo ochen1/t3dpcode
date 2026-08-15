@@ -198,6 +198,15 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
       Effect.succeed({ threadId, turns: [] }),
   );
 
+  const forkThread = vi.fn((threadId: ThreadId, throughTurnId?: TurnId) =>
+    Effect.succeed({
+      resumeCursor: {
+        threadId: `fork-of-${threadId}`,
+        ...(throughTurnId !== undefined ? { throughTurnId } : {}),
+      },
+    }),
+  );
+
   const stopAll = vi.fn(
     (): Effect.Effect<void, ProviderAdapterError> =>
       Effect.sync(() => {
@@ -220,6 +229,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     hasSession,
     readThread,
     rollbackThread,
+    forkThread,
     stopAll,
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
@@ -255,6 +265,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
     hasSession,
     readThread,
     rollbackThread,
+    forkThread,
     stopAll,
   };
 }
@@ -944,6 +955,21 @@ routing.layer("ProviderServiceLive routing", (it) => {
       yield* provider.rollbackConversation({
         threadId: session.threadId,
         numTurns: 0,
+      });
+
+      const fork = yield* provider.forkConversation({
+        threadId: session.threadId,
+        throughTurnId: asTurnId("turn-1"),
+      });
+      assert.deepEqual(routing.codex.forkThread.mock.calls, [
+        [session.threadId, asTurnId("turn-1")],
+      ]);
+      assert.deepEqual(fork, {
+        providerInstanceId: codexInstanceId,
+        resumeCursor: {
+          threadId: `fork-of-${session.threadId}`,
+          throughTurnId: asTurnId("turn-1"),
+        },
       });
 
       yield* provider.stopSession({ threadId: session.threadId });

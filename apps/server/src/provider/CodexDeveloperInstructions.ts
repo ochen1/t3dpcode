@@ -11,6 +11,13 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
 
+const T3_CODE_CHAT_HISTORY_INSTRUCTIONS = `
+
+## T3 Code chat history
+
+Repository instructions, environment context, skills, permissions, and other harness-provided setup are context, not user-sent chat messages. When the user asks about the first, previous, or earlier message in the conversation, answer from the user-authored chat messages and do not identify harness-provided setup as a user message.
+`;
+
 export const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
 You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed-intent- and implementation-wise-so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
@@ -174,7 +181,7 @@ export function buildCodexDeveloperInstructions(
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
-  return `${base}
+  return `${base}${T3_CODE_CHAT_HISTORY_INSTRUCTIONS}
 
 <runtime_info>In case you're asked: you are running in T3 Code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }

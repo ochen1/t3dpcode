@@ -1,5 +1,6 @@
 import {
   EventId,
+  MessageId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -24,6 +25,8 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const timestampOffsetIso = (baseIso: string, offsetMs: number) =>
+  DateTime.formatIso(DateTime.add(DateTime.makeUnsafe(baseIso), { milliseconds: offsetMs }));
 
 // Session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -423,6 +426,189 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+    }
+
+    case "thread.branch": {
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      const sourceProject = yield* requireProject({
+        readModel,
+        command,
+        projectId: sourceThread.projectId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+
+      const sourceMessageIndex =
+        command.sourceMessageId === undefined
+          ? sourceThread.messages.length - 1
+          : sourceThread.messages.findIndex((message) => message.id === command.sourceMessageId);
+      if (command.sourceMessageId !== undefined && sourceMessageIndex < 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Message '${command.sourceMessageId}' does not exist on source thread '${command.sourceThreadId}'.`,
+        });
+      }
+      const sourceMessage = sourceThread.messages[sourceMessageIndex];
+      if (command.sourceMessageId !== undefined && sourceMessage?.role !== "assistant") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Message '${command.sourceMessageId}' is not an assistant message.`,
+        });
+      }
+      if (sourceMessage?.streaming === true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Message '${sourceMessage.id}' is still streaming and cannot be used as a branch point.`,
+        });
+      }
+      if (command.sourceMessageId !== undefined && sourceMessage?.turnId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Message '${command.sourceMessageId}' has no completed provider turn to branch from.`,
+        });
+      }
+      if (
+        command.sourceMessageId === undefined &&
+        (sourceThread.session?.status === "running" ||
+          sourceThread.messages.some((message) => message.streaming))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.sourceThreadId}' is still running. Choose a completed assistant message or wait for it to finish.`,
+        });
+      }
+
+      const createdEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: sourceThread.projectId,
+          title: command.title ?? `${sourceThread.title} (Fork)`,
+          modelSelection: sourceThread.modelSelection,
+          runtimeMode: sourceThread.runtimeMode,
+          interactionMode: sourceThread.interactionMode,
+          branch: sourceThread.branch,
+          worktreePath: sourceThread.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+
+      const messages = sourceThread.messages.slice(0, sourceMessageIndex + 1);
+      const includedTurnIds = new Set(
+        messages.flatMap((message) => (message.turnId === null ? [] : [message.turnId])),
+      );
+      const activities = sourceThread.activities.filter((activity) => {
+        if (activity.turnId !== null) return includedTurnIds.has(activity.turnId);
+        return sourceMessage === undefined || activity.createdAt <= sourceMessage.updatedAt;
+      });
+      const entries = [
+        ...messages.map((message, sourceIndex) => ({
+          kind: "message" as const,
+          createdAt: message.createdAt,
+          sourceIndex,
+          message,
+        })),
+        ...activities.map((activity, sourceIndex) => ({
+          kind: "activity" as const,
+          createdAt: activity.createdAt,
+          sourceIndex,
+          activity,
+        })),
+      ].toSorted((left, right) =>
+        left.createdAt === right.createdAt
+          ? left.kind === right.kind
+            ? left.sourceIndex - right.sourceIndex
+            : left.kind === "message"
+              ? -1
+              : 1
+          : left.createdAt.localeCompare(right.createdAt),
+      );
+
+      const crypto = yield* Crypto.Crypto;
+      const copiedEvents: PlannedOrchestrationEvent[] = [];
+      for (const [index, entry] of entries.entries()) {
+        const copiedAt = timestampOffsetIso(command.createdAt, index + 1);
+        const eventBase = yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: copiedAt,
+          commandId: command.commandId,
+        });
+        if (entry.kind === "message") {
+          copiedEvents.push({
+            ...eventBase,
+            causationEventId: createdEvent.eventId,
+            type: "thread.message-sent",
+            payload: {
+              threadId: command.threadId,
+              messageId: MessageId.make(yield* crypto.randomUUIDv4),
+              role: entry.message.role,
+              text: entry.message.text,
+              ...(entry.message.attachments !== undefined
+                ? { attachments: entry.message.attachments }
+                : {}),
+              turnId: entry.message.turnId,
+              streaming: false,
+              createdAt: copiedAt,
+              updatedAt: copiedAt,
+            },
+          });
+          continue;
+        }
+        copiedEvents.push({
+          ...eventBase,
+          causationEventId: createdEvent.eventId,
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              ...entry.activity,
+              id: EventId.make(yield* crypto.randomUUIDv4),
+              sequence: index,
+              createdAt: copiedAt,
+            },
+          },
+        });
+      }
+
+      const requestedAt = timestampOffsetIso(command.createdAt, entries.length + 1);
+      const branchRequestedEvent: PlannedOrchestrationEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: requestedAt,
+          commandId: command.commandId,
+        })),
+        causationEventId: createdEvent.eventId,
+        type: "thread.branch-requested",
+        payload: {
+          threadId: command.threadId,
+          sourceThreadId: command.sourceThreadId,
+          ...(sourceMessage?.turnId !== null && sourceMessage?.turnId !== undefined
+            ? { throughTurnId: sourceMessage.turnId }
+            : {}),
+          modelSelection: sourceThread.modelSelection,
+          runtimeMode: sourceThread.runtimeMode,
+          cwd: sourceThread.worktreePath ?? sourceProject.workspaceRoot,
+          createdAt: requestedAt,
+        },
+      };
+
+      return [createdEvent, ...copiedEvents, branchRequestedEvent];
     }
 
     case "thread.delete": {

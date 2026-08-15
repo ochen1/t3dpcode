@@ -14,6 +14,7 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
+const NOOP_FORK_ASSISTANT_MESSAGE = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -53,6 +54,7 @@ import {
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
+  GitBranchIcon,
   HammerIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
@@ -138,6 +140,9 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onForkAssistantMessage: (messageId: MessageId) => void;
+  canForkThread: boolean;
+  isForkingThread: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
@@ -217,6 +222,9 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onForkAssistantMessage?: (messageId: MessageId) => void;
+  canForkThread?: boolean;
+  isForkingThread?: boolean;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -263,6 +271,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onForkAssistantMessage = NOOP_FORK_ASSISTANT_MESSAGE,
+  canForkThread = false,
+  isForkingThread = false,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -511,6 +522,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onForkAssistantMessage,
+      canForkThread,
+      isForkingThread,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -527,6 +541,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onForkAssistantMessage,
+      canForkThread,
+      isForkingThread,
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
@@ -1124,6 +1141,25 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <AssistantCopyButton row={row} />
+            {ctx.canForkThread && !row.message.streaming && row.message.turnId !== null ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={ctx.isForkingThread}
+                      onClick={() => ctx.onForkAssistantMessage(row.message.id)}
+                      aria-label="Fork from this response"
+                    />
+                  }
+                >
+                  <GitBranchIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">Fork from this response</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger

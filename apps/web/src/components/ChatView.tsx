@@ -201,7 +201,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -1215,6 +1215,7 @@ function ChatViewContent(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const branchThread = useAtomCommand(threadEnvironment.branch, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -6131,6 +6132,50 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  const [isForkingThread, setIsForkingThread] = useState(false);
+  const canForkThread =
+    isServerThread &&
+    (activeProviderStatus?.driver === "claudeAgent" || activeProviderStatus?.driver === "codex");
+  const onForkAssistantMessage = useCallback(
+    async (sourceMessageId: MessageId) => {
+      if (!activeThread || !isServerThread || isForkingThread || !canForkThread) {
+        return;
+      }
+
+      const nextThreadId = newThreadId();
+      setIsForkingThread(true);
+      const branchResult = await branchThread({
+        environmentId: activeThread.environmentId,
+        input: {
+          sourceThreadId: activeThread.id,
+          sourceMessageId,
+          threadId: nextThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      if (branchResult._tag === "Success") {
+        const destinationRef = scopeThreadRef(activeThread.environmentId, nextThreadId);
+        await waitForStartedServerThread(destinationRef);
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(destinationRef),
+        });
+      } else if (!isAtomCommandInterrupted(branchResult)) {
+        const error = squashAtomCommandFailure(branchResult);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not fork thread",
+            description:
+              error instanceof Error ? error.message : "The provider could not fork this thread.",
+          }),
+        );
+      }
+      setIsForkingThread(false);
+    },
+    [activeThread, branchThread, canForkThread, isForkingThread, isServerThread, navigate],
+  );
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -6387,6 +6432,9 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
+                onForkAssistantMessage={onForkAssistantMessage}
+                canForkThread={canForkThread}
+                isForkingThread={isForkingThread}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}

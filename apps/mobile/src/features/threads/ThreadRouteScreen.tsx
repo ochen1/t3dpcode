@@ -7,13 +7,13 @@ import {
 } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Option from "effect/Option";
-import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ThreadId, type ProjectScript } from "@t3tools/contracts";
 import {
   requestOlderThreadTurns,
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
-import { Platform, ScrollView, View } from "react-native";
+import { Alert, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useWorkspaceState } from "../../state/workspace";
 import { useEnvironmentQuery } from "../../state/query";
@@ -63,6 +63,7 @@ import { useSelectedThreadRequests } from "../../state/use-selected-thread-reque
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { threadEnvironment } from "../../state/threads";
+import { uuidv4 } from "../../lib/uuid";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import {
   useAdaptiveWorkspaceLayout,
@@ -214,6 +215,8 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const branchThread = useAtomCommand(threadEnvironment.branch, { reportFailure: false });
+  const [isForkingThread, setIsForkingThread] = useState(false);
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -749,6 +752,39 @@ function ThreadRouteContent(
     ],
     [navigation],
   );
+  const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
+  const activeProviderDriver = selectedThread
+    ? serverConfig?.providers.find(
+        (provider) => provider.instanceId === selectedThread.modelSelection.instanceId,
+      )?.driver
+    : undefined;
+  const canForkThread = activeProviderDriver === "claudeAgent" || activeProviderDriver === "codex";
+  const handleForkAssistantMessage = useCallback(
+    async (sourceMessageId: MessageId) => {
+      if (!selectedThread || isForkingThread || !canForkThread) return;
+      const nextThreadId = ThreadId.make(uuidv4());
+      setIsForkingThread(true);
+      const result = await branchThread({
+        environmentId: selectedThread.environmentId,
+        input: {
+          sourceThreadId: selectedThread.id,
+          sourceMessageId,
+          threadId: nextThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      if (result._tag === "Success") {
+        navigation.navigate("Thread", {
+          environmentId: selectedThread.environmentId,
+          threadId: nextThreadId,
+        });
+      } else {
+        Alert.alert("Could not fork thread", "The provider could not fork this response.");
+      }
+      setIsForkingThread(false);
+    },
+    [branchThread, canForkThread, isForkingThread, navigation, selectedThread],
+  );
 
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
@@ -764,7 +800,6 @@ function ThreadRouteContent(
     detailDeleted: selectedThreadDetailState.status === "deleted",
     connectionState: routeConnectionState,
   });
-  const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
@@ -804,6 +839,9 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
+          canForkThread={canForkThread}
+          isForkingThread={isForkingThread}
+          onForkAssistantMessage={handleForkAssistantMessage}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}

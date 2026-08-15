@@ -150,9 +150,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        // The command snapshot deliberately omits message/activity bodies. A branch is the one
+        // command that copies them, so hydrate only its source thread instead of making every
+        // command pay the cost of a full read model.
+        const branchCommand =
+          envelope.command.type === "thread.branch" ? envelope.command : undefined;
+        const decisionReadModel =
+          branchCommand !== undefined
+            ? yield* projectionSnapshotQuery.getThreadDetailById(branchCommand.sourceThreadId).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(
+                        new OrchestrationCommandInvariantError({
+                          commandType: branchCommand.type,
+                          detail: `Source thread '${branchCommand.sourceThreadId}' has no projected history to branch.`,
+                        }),
+                      ),
+                    onSome: (sourceThread) =>
+                      Effect.succeed({
+                        ...commandReadModel,
+                        threads: commandReadModel.threads.map((thread) =>
+                          thread.id === sourceThread.id ? sourceThread : thread,
+                        ),
+                      }),
+                  }),
+                ),
+              )
+            : commandReadModel;
+
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel: commandReadModel,
+          readModel: decisionReadModel,
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>

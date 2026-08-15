@@ -1874,6 +1874,24 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   };
 
+  const forkThread: NonNullable<CodexAdapterShape["forkThread"]> = (threadId, throughTurnId) =>
+    Effect.gen(function* () {
+      const session = yield* requireSession(threadId);
+      const resumeCursor = yield* session.runtime.forkThread(throughTurnId);
+      // A Codex app-server process holds an exclusive writer lease for every
+      // thread it loads, including a newly forked thread. Closing the source
+      // runtime hands that lease to the destination process; the source can
+      // be resumed from its persisted cursor on its next turn.
+      yield* stopSessionInternal(session);
+      return { resumeCursor };
+    }).pipe(
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/fork", cause),
+      ),
+    );
+
   const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.respondToRequest(requestId, decision)),
@@ -1961,6 +1979,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    forkThread,
     respondToRequest,
     respondToUserInput,
     stopSession,

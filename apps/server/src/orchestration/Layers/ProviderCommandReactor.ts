@@ -53,6 +53,7 @@ type ProviderIntentEvent = Extract<
   {
     type:
       | "thread.meta-updated"
+      | "thread.branch-requested"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
@@ -61,6 +62,19 @@ type ProviderIntentEvent = Extract<
       | "thread.session-stop-requested";
   }
 >;
+
+export function isProviderIntentEvent(event: OrchestrationEvent): event is ProviderIntentEvent {
+  return (
+    (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
+    event.type === "thread.branch-requested" ||
+    event.type === "thread.runtime-mode-set" ||
+    event.type === "thread.turn-start-requested" ||
+    event.type === "thread.turn-interrupt-requested" ||
+    event.type === "thread.approval-response-requested" ||
+    event.type === "thread.user-input-response-requested" ||
+    event.type === "thread.session-stop-requested"
+  );
+}
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -345,7 +359,8 @@ const make = Effect.gen(function* () {
       | "provider.turn.interrupt.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
-      | "provider.session.stop.failed";
+      | "provider.session.stop.failed"
+      | "provider.session.branch.failed";
     readonly summary: string;
     readonly detail: string;
     readonly turnId: TurnId | null;
@@ -1184,6 +1199,46 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 
+  const processBranchRequested = Effect.fn("processBranchRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.branch-requested" }>,
+  ) {
+    // Native provider forks operate on a live source session. Historical
+    // threads may have been reaped or the server may have restarted, so
+    // restore the source from its persisted cursor before asking the adapter
+    // to fork it.
+    yield* ensureSessionForThread(event.payload.sourceThreadId, event.payload.createdAt);
+    const fork = yield* providerService.forkConversation({
+      threadId: event.payload.sourceThreadId,
+      expectedProviderInstanceId: event.payload.modelSelection.instanceId,
+      ...(event.payload.throughTurnId !== undefined
+        ? { throughTurnId: event.payload.throughTurnId }
+        : {}),
+    });
+    const session = yield* providerService.startSession(event.payload.threadId, {
+      threadId: event.payload.threadId,
+      providerInstanceId: fork.providerInstanceId,
+      cwd: event.payload.cwd,
+      modelSelection: event.payload.modelSelection,
+      resumeCursor: fork.resumeCursor,
+      runtimeMode: event.payload.runtimeMode,
+    });
+    threadModelSelections.set(event.payload.threadId, event.payload.modelSelection);
+    yield* setThreadSession({
+      threadId: event.payload.threadId,
+      session: {
+        threadId: event.payload.threadId,
+        status: mapProviderSessionStatusToOrchestrationStatus(session.status),
+        providerName: session.provider,
+        providerInstanceId: fork.providerInstanceId,
+        runtimeMode: event.payload.runtimeMode,
+        activeTurnId: null,
+        lastError: session.lastError ?? null,
+        updatedAt: session.updatedAt,
+      },
+      createdAt: event.payload.createdAt,
+    });
+  });
+
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
@@ -1341,6 +1396,29 @@ const make = Effect.gen(function* () {
       case "thread.meta-updated":
         yield* threadTitleRegenerationWorker.enqueue(event);
         return;
+      case "thread.branch-requested":
+        yield* processBranchRequested(event).pipe(
+          Effect.catchCause((cause) => {
+            const detail = formatFailureDetail(cause);
+            return setThreadSessionErrorOnTurnStartFailure({
+              threadId: event.payload.threadId,
+              detail,
+              createdAt: event.payload.createdAt,
+            }).pipe(
+              Effect.andThen(
+                appendProviderFailureActivity({
+                  threadId: event.payload.threadId,
+                  kind: "provider.session.branch.failed",
+                  summary: "Provider fork failed",
+                  detail,
+                  turnId: null,
+                  createdAt: event.payload.createdAt,
+                }),
+              ),
+            );
+          }),
+        );
+        return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThread(event.payload.threadId);
         if (!thread?.session || thread.session.status === "stopped") {
@@ -1400,15 +1478,7 @@ const make = Effect.gen(function* () {
       }),
     );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
-      if (
-        (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
-        event.type === "thread.runtime-mode-set" ||
-        event.type === "thread.turn-start-requested" ||
-        event.type === "thread.turn-interrupt-requested" ||
-        event.type === "thread.approval-response-requested" ||
-        event.type === "thread.user-input-response-requested" ||
-        event.type === "thread.session-stop-requested"
-      ) {
+      if (isProviderIntentEvent(event)) {
         return yield* worker.enqueue(event);
       }
     });

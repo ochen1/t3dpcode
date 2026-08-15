@@ -695,6 +695,16 @@ const ThreadCreateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadBranchCommand = Schema.Struct({
+  type: Schema.Literal("thread.branch"),
+  commandId: CommandId,
+  sourceThreadId: ThreadId,
+  sourceMessageId: Schema.optional(MessageId),
+  threadId: ThreadId,
+  title: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const ThreadDeleteCommand = Schema.Struct({
   type: Schema.Literal("thread.delete"),
   commandId: CommandId,
@@ -985,6 +995,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadBranchCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1016,6 +1027,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
+  ThreadBranchCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -1146,6 +1158,7 @@ export const OrchestrationEventType = Schema.Literals([
   "project.meta-updated",
   "project.deleted",
   "thread.created",
+  "thread.branch-requested",
   "thread.deleted",
   "thread.archived",
   "thread.unarchived",
@@ -1224,6 +1237,16 @@ export const ThreadCreatedPayload = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+});
+
+export const ThreadBranchRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  sourceThreadId: ThreadId,
+  throughTurnId: Schema.optional(TurnId),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  cwd: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
 });
 
 export const ThreadDeletedPayload = Schema.Struct({
@@ -1466,6 +1489,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.created"),
     payload: ThreadCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.branch-requested"),
+    payload: ThreadBranchRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
