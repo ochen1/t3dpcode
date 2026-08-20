@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("041_BackfillCodexProviderThreadIds", (it) => {
+layer("044_BackfillCodexProviderThreadIds", (it) => {
   it.effect("backfills safe Codex thread ids without overwriting existing values", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
