@@ -78,6 +78,10 @@ import {
 } from "./previewAutomation.ts";
 import type {
   ClientOrchestrationCommand,
+  ExternalConversationImportInput,
+  ExternalConversationImportResult,
+  ExternalConversationListInput,
+  ExternalConversationListResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
@@ -1355,6 +1359,12 @@ export interface EnvironmentApi {
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
+    listExternalConversations: (
+      input: ExternalConversationListInput,
+    ) => Promise<ExternalConversationListResult>;
+    importExternalConversation: (
+      input: ExternalConversationImportInput,
+    ) => Promise<ExternalConversationImportResult>;
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,
       options?: {

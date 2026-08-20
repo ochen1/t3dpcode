@@ -3,6 +3,7 @@ import {
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
   AuthRelayWriteScope,
+  ORCHESTRATION_WS_METHODS,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -35,6 +36,15 @@ describe("RPC authorization scopes", () => {
       AuthRelayReadScope,
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.cloudInstallRelayClient)).toBe(AuthRelayWriteScope);
+  });
+
+  it("requires operate access before exposing external provider history", () => {
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.listExternalConversations)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(ORCHESTRATION_WS_METHODS.importExternalConversation)).toBe(
+      AuthOrchestrationOperateScope,
+    );
   });
 
   it("reads the reviewer menu under the same scope as the pull request it belongs to", () => {

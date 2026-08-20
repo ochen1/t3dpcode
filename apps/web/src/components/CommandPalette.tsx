@@ -38,6 +38,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  ImportIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -131,6 +132,7 @@ import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons"
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
+import { ExternalConversationImportDialog } from "./ExternalConversationImportDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import {
   COMMAND_PALETTE_META_ICON_CLASS,
@@ -479,11 +481,13 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
           openAddProject();
+        } else if (detail.open === "import-conversation") {
+          toggleMode("import");
         } else {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, openNewThreadIn, setOpen, toggleMode],
   );
 
   return (
@@ -528,7 +532,9 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : "Command palette"
+            : props.mode === "import"
+              ? "Import conversation"
+              : "Command palette"
       }
       className={cn("overflow-hidden p-0", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -546,6 +552,11 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
+      ) : props.mode === "import" ? (
+        <ExternalConversationImportDialog
+          onBack={() => props.openOverlayMode("command")}
+          onClose={() => props.setOpen(false)}
+        />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}
@@ -590,6 +601,17 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
+  const hasExternalConversationImport = useMemo(() => {
+    const capableEnvironmentIds = new Set(
+      environments
+        .filter(
+          (environment) =>
+            environment.serverConfig?.environment.capabilities.externalConversationImport === true,
+        )
+        .map((environment) => environment.environmentId),
+    );
+    return projects.some((project) => capableEnvironmentIds.has(project.environmentId));
+  }, [environments, projects]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1525,6 +1547,21 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
     });
+
+    if (hasExternalConversationImport) {
+      actionItems.push({
+        kind: "action",
+        value: "action:import-conversation",
+        searchTerms: ["import conversation", "claude code", "codex", "history", "external"],
+        title: "Import conversation",
+        description: "Claude Code or Codex",
+        icon: <ImportIcon className={ITEM_ICON_CLASS} />,
+        keepOpen: true,
+        run: async () => {
+          openOverlayMode("import");
+        },
+      });
+    }
   }
 
   actionItems.push({

@@ -44,6 +44,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  ImportIcon,
   MessageSquareIcon,
   PinIcon,
   PlusIcon,
@@ -3346,6 +3347,10 @@ export default function Sidebar() {
     if (isMobile) setOpenMobile(false);
     openCommandPalette({ open: "new-thread-in" });
   }, [isMobile, newThreadContext, projectGroups.length, setOpenMobile]);
+  const handleImportConversationClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "import-conversation" });
+  }, [isMobile, setOpenMobile]);
 
   // The explicit project picker remains available as "New thread in..." in
   // the command palette.
@@ -3353,6 +3358,11 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const hasExternalConversationImport = projects.some(
+    (project) =>
+      serverConfigs.get(project.environmentId)?.environment.capabilities
+        .externalConversationImport === true,
+  );
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
@@ -3418,7 +3428,7 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
+                        disabled={!hasExternalConversationImport}
                         aria-label="New thread"
                       />
                     }
@@ -3450,6 +3460,25 @@ export default function Sidebar() {
                       "New thread"
                     )}
                   </TooltipPopup>
+                </Tooltip>
+              </div>
+              <div className="shrink-0">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <SidebarMenuButton
+                        size="icon"
+                        type="button"
+                        className="focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                        onClick={handleImportConversationClick}
+                        disabled={projects.length === 0}
+                        aria-label="Import conversation"
+                      />
+                    }
+                  >
+                    <ImportIcon />
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">Import Claude Code or Codex conversation</TooltipPopup>
                 </Tooltip>
               </div>
             </div>
