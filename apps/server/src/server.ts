@@ -61,6 +61,8 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.
 import { QueuedTurnReactorLive } from "./orchestration/Layers/QueuedTurnReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
+import * as SelfHostedPushNotifications from "./notifications/SelfHostedPushNotifications.ts";
+import { notificationsHttpApiLayer } from "./notifications/http.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -248,6 +250,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(QueuedTurnReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+  Layer.provideMerge(SelfHostedPushNotifications.layer),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
 
@@ -454,6 +457,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(orchestrationHttpApiLayer),
       Layer.provide(pullRequestHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
+      Layer.provide(notificationsHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     otlpTracesProxyRouteLayer,

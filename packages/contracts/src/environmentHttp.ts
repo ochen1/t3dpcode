@@ -607,9 +607,39 @@ export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
     }),
   ) {}
 
+export const SelfHostedPushDeviceRegistration = Schema.Struct({
+  deviceId: TrimmedNonEmptyString,
+  expoPushToken: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+});
+export type SelfHostedPushDeviceRegistration = typeof SelfHostedPushDeviceRegistration.Type;
+
+export const SelfHostedPushDeviceRegistrationResult = Schema.Struct({
+  registered: Schema.Boolean,
+});
+
+export class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifications")
+  .add(
+    HttpApiEndpoint.post("registerDevice", "/api/notifications/device", {
+      headers: OptionalBearerHeaders,
+      payload: SelfHostedPushDeviceRegistration,
+      success: SelfHostedPushDeviceRegistrationResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.delete("unregisterDevice", "/api/notifications/device/:deviceId", {
+      headers: OptionalBearerHeaders,
+      params: Schema.Struct({ deviceId: TrimmedNonEmptyString }),
+      success: SelfHostedPushDeviceRegistrationResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
-  .add(EnvironmentConnectHttpApi) {}
+  .add(EnvironmentConnectHttpApi)
+  .add(EnvironmentNotificationsHttpApi) {}
