@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("045_BackfillCodexProviderThreadIds", (it) => {
+layer("046_BackfillCodexProviderThreadIds", (it) => {
   it.effect("backfills safe Codex thread ids without overwriting existing values", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -33,7 +33,7 @@ layer("045_BackfillCodexProviderThreadIds", (it) => {
           ('thread-unsafe', 'codex', 'codex', 'full-access', 'ready', '2026-08-06T00:00:00.000Z', '{"threadId":"unsafe;command"}', NULL)
       `;
 
-      yield* runMigrations({ toMigrationInclusive: 40 });
+      yield* runMigrations({ toMigrationInclusive: 46 });
       const rows = yield* sql<{
         readonly threadId: string;
         readonly providerThreadId: string | null;
