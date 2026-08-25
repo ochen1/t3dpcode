@@ -1926,12 +1926,17 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "turn.diff.updated") {
+        const enableGitCheckpointing = yield* Effect.map(
+          serverSettingsService.getSettings,
+          (settings) => settings.enableGitCheckpointing,
+        );
         const turnId = toTurnId(event.turnId);
-        const checkpointContext = turnId
-          ? yield* projectionSnapshotQuery
-              .getThreadCheckpointContext(thread.id)
-              .pipe(Effect.map(Option.getOrUndefined))
-          : undefined;
+        const checkpointContext =
+          enableGitCheckpointing && turnId
+            ? yield* projectionSnapshotQuery
+                .getThreadCheckpointContext(thread.id)
+                .pipe(Effect.map(Option.getOrUndefined))
+            : undefined;
         const workspaceCwd =
           checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
         if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd)) {

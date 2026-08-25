@@ -11,6 +11,7 @@ import type {
   VcsDriverKind,
   VcsDiscoveryItem,
 } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import {
   getBackgroundActivityBaseProfile,
   getBackgroundActivityPresetSettings,
@@ -59,6 +60,7 @@ import {
   PolicyTooltip,
   SettingResetButton,
   SettingsPageContainer,
+  SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -411,6 +413,42 @@ function GitFetchIntervalSettings() {
   );
 }
 
+function GitCheckpointingSettings() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsSection title="Checkpointing">
+      <SettingsRow
+        {...searchableSetting("git-checkpointing")}
+        title="Git checkpoints"
+        description="Capture hidden Git snapshots after agent turns for diffs and workspace restore. Existing checkpoints remain available when this is off."
+        resetAction={
+          settings.enableGitCheckpointing !== DEFAULT_SERVER_SETTINGS.enableGitCheckpointing ? (
+            <SettingResetButton
+              label="Git checkpoints"
+              onClick={() =>
+                updateSettings({
+                  enableGitCheckpointing: DEFAULT_SERVER_SETTINGS.enableGitCheckpointing,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={settings.enableGitCheckpointing}
+            onCheckedChange={(checked) =>
+              updateSettings({ enableGitCheckpointing: Boolean(checked) })
+            }
+            aria-label="Enable Git checkpoints"
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 function SourceControlSectionSkeleton({
   title,
   headerAction,
@@ -538,6 +576,7 @@ export function SourceControlSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      {isPrimaryEnvironment ? <GitCheckpointingSettings /> : null}
       {isInitialScanPending ? (
         <>
           <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />

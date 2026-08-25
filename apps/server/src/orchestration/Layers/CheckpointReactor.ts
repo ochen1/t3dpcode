@@ -38,6 +38,7 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -88,6 +89,18 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const serverSettings = yield* ServerSettingsService;
+
+  const gitCheckpointingEnabled = Effect.map(
+    serverSettings.getSettings,
+    (settings) => settings.enableGitCheckpointing,
+  ).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("failed to read Git checkpointing setting", {
+        detail: error.message,
+      }).pipe(Effect.as(true)),
+    ),
+  );
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -354,6 +367,9 @@ const make = Effect.gen(function* () {
   // Captures a real git checkpoint when a turn completes via a runtime event.
   const captureCheckpointFromTurnCompletion = Effect.fn("captureCheckpointFromTurnCompletion")(
     function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
+      if (!(yield* gitCheckpointingEnabled)) {
+        return;
+      }
       const turnId = toTurnId(event.turnId);
       if (!turnId) {
         return;
@@ -428,6 +444,9 @@ const make = Effect.gen(function* () {
   const captureCheckpointFromPlaceholder = Effect.fn("captureCheckpointFromPlaceholder")(function* (
     event: Extract<OrchestrationEvent, { type: "thread.turn-diff-completed" }>,
   ) {
+    if (!(yield* gitCheckpointingEnabled)) {
+      return;
+    }
     const { threadId, turnId, checkpointTurnCount, status } = event.payload;
 
     // Only replace placeholders; skip events from our own real captures.
@@ -481,6 +500,9 @@ const make = Effect.gen(function* () {
 
   const ensurePreTurnBaselineFromTurnStart = Effect.fn("ensurePreTurnBaselineFromTurnStart")(
     function* (event: Extract<ProviderRuntimeEvent, { type: "turn.started" }>) {
+      if (!(yield* gitCheckpointingEnabled)) {
+        return;
+      }
       const turnId = toTurnId(event.turnId);
       if (!turnId) {
         return;
@@ -634,6 +656,9 @@ const make = Effect.gen(function* () {
       { type: "thread.turn-start-requested" | "thread.message-sent" }
     >,
   ) {
+    if (!(yield* gitCheckpointingEnabled)) {
+      return;
+    }
     if (event.type === "thread.message-sent") {
       if (
         event.payload.role !== "user" ||

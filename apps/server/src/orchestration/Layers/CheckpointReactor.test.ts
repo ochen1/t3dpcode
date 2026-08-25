@@ -59,6 +59,7 @@ import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
@@ -286,6 +287,7 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
+    readonly enableGitCheckpointing?: boolean;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -350,6 +352,11 @@ describe("CheckpointReactor", () => {
       ),
       Layer.provideMerge(WorkspacePaths.layer),
       Layer.provideMerge(VcsProcess.layer),
+      Layer.provideMerge(
+        ServerSettingsService.layerTest({
+          enableGitCheckpointing: options?.enableGitCheckpointing ?? true,
+        }),
+      ),
       Layer.provideMerge(ServerConfigLayer),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -528,6 +535,41 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
+  });
+
+  it("does not create Git refs or checkpoint summaries when checkpointing is disabled", async () => {
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      enableGitCheckpointing: false,
+    });
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-disabled-turn-started"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-disabled"),
+    });
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-disabled-turn-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-disabled"),
+      payload: { state: "completed" },
+    });
+    await harness.drain();
+
+    const snapshot = await harness.readModel();
+    expect(snapshot.threads[0]?.checkpoints).toEqual([]);
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0)),
+    ).toBe(false);
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1)),
+    ).toBe(false);
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {

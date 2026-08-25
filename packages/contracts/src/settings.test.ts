@@ -18,6 +18,15 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
+describe("ServerSettings Git checkpointing", () => {
+  it("defaults on and accepts an explicit disable patch", () => {
+    expect(decodeServerSettings({}).enableGitCheckpointing).toBe(true);
+    expect(
+      decodeServerSettingsPatch({ enableGitCheckpointing: false }).enableGitCheckpointing,
+    ).toBe(false);
+  });
+});
+
 describe("ClientSettings word wrap", () => {
   it("defaults word wrap on", () => {
     expect(decodeClientSettings({}).wordWrap).toBe(true);

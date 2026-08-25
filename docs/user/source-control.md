@@ -63,6 +63,12 @@ The **Source Control settings** page shows you exactly what's connected:
 
 Run a quick **Rescan** after setting up a new machine or changing credentials.
 
+### Git Checkpoints
+
+T3 Code captures hidden Git snapshots after agent turns so it can show turn diffs and restore your
+workspace to an earlier turn. To stop creating new snapshots, turn off **Settings → Source Control →
+Git checkpoints**. Existing checkpoints remain available for restore.
+
 ## Getting Started
 
 ### For GitHub (Recommended for most users)
