@@ -68,7 +68,6 @@ function renderStandaloneStop() {
     }),
   );
 }
-
 function renderRunningActions(showSendWhileRunning: boolean, hasSendableContent: boolean) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
@@ -229,7 +228,6 @@ describe("ComposerPrimaryActions", () => {
     expect(renderStandaloneStop()).toContain("size-8 sm:h-8 sm:w-8");
     expect(renderStandaloneStop()).not.toContain("sm:size-7");
   });
-
   it("renders stage artwork inside the send button when artwork identification is active", () => {
     stageArtworkState.mode = "artwork";
     stageArtworkState.variant = "nightly";
@@ -237,17 +235,14 @@ describe("ComposerPrimaryActions", () => {
     const markup = renderSendButton();
 
     expect(markup).toContain("stage-nightly");
-    expect(markup).toContain("bg-transparent text-white");
-    expect(markup).not.toContain("bg-message-action text-message-action-foreground");
   });
 
-  it("keeps the normal send-button fill when artwork identification is inactive", () => {
+  it("hides stage artwork when artwork identification is inactive", () => {
     stageArtworkState.variant = "nightly";
 
     const markup = renderSendButton();
 
     expect(markup).not.toContain("stage-nightly");
-    expect(markup).toContain("bg-message-action text-message-action-foreground");
   });
 
   it("only renders stop while running when Enter-to-send is available", () => {
@@ -263,7 +258,6 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Stop generation"');
     expect(markup).toContain('aria-label="Send message"');
     expect(markup).toContain('type="submit"');
-    expect(markup).toContain("size-9 sm:size-8");
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {

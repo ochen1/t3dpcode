@@ -6,6 +6,7 @@ import type {
   PreviewSessionSnapshot,
   ScopedThreadRef,
 } from "@t3tools/contracts";
+import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
 import {
   type AtomCommandResult,
   mapAtomCommandResult,
@@ -23,6 +24,11 @@ import {
 import { useRightPanelStore } from "~/rightPanelStore";
 
 export { isBrowserPreviewFile, isBrowserPreviewImageFile } from "./previewFilePaths";
+import {
+  browserDefaultOpenProfileId,
+  browserDefaultOpenViewport,
+  resolveBrowserDefaults,
+} from "./browserDefaults";
 
 export class BrowserPreviewUnavailableError extends Data.TaggedError(
   "BrowserPreviewUnavailableError",
@@ -46,9 +52,18 @@ export async function openUrlInPreview<E>(input: {
   readonly url: string;
   readonly openPreview: OpenPreviewMutation<E>;
 }): Promise<AtomCommandResult<void, E>> {
+  const defaults = await resolveBrowserDefaults();
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
-    input: { threadId: input.threadRef.threadId, url: input.url },
+    input: {
+      threadId: input.threadRef.threadId,
+      url: input.url,
+      // Built here rather than via `openPreviewSession` because this path
+      // maps the result differently, so the configured defaults have to be
+      // applied explicitly or file/link opens would ignore them.
+      viewport: browserDefaultOpenViewport(defaults),
+      profileId: browserDefaultOpenProfileId(defaults),
+    },
   });
   return mapAtomCommandResult(result, (snapshot) => {
     applyPreviewServerSnapshot(input.threadRef, snapshot);
@@ -60,17 +75,20 @@ export async function openUrlInPreview<E>(input: {
 export async function createWorkspaceFileAssetUrl<AssetError>(input: {
   readonly threadRef: ScopedThreadRef;
   readonly filePath: string;
+  readonly workspaceRoot: string | undefined;
   readonly httpBaseUrl: string;
   readonly createAssetUrl: (input: {
     readonly environmentId: EnvironmentId;
     readonly input: { readonly resource: AssetResource };
   }) => Promise<AtomCommandResult<AssetCreateUrlResult, AssetError>>;
 }): Promise<AtomCommandResult<string, AssetError | BrowserAssetUrlResolutionError>> {
+  const insideWorkspace =
+    mediaFileReference(input.filePath, input.workspaceRoot).relativePath !== undefined;
   const assetResult = await input.createAssetUrl({
     environmentId: input.threadRef.environmentId,
     input: {
       resource: {
-        _tag: "workspace-file",
+        _tag: insideWorkspace ? "workspace-file" : "media-file",
         threadId: input.threadRef.threadId,
         path: input.filePath,
       },
@@ -95,6 +113,7 @@ export async function createWorkspaceFileAssetUrl<AssetError>(input: {
 export async function openFileInPreview<AssetError, PreviewError>(input: {
   readonly threadRef: ScopedThreadRef;
   readonly filePath: string;
+  readonly workspaceRoot: string | undefined;
   readonly httpBaseUrl: string;
   readonly createAssetUrl: (input: {
     readonly environmentId: EnvironmentId;

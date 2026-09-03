@@ -18,7 +18,6 @@ import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { SymbolView } from "../../components/AppSymbol";
 import { relativeTime } from "../../lib/time";
-import { useThemeColor } from "../../lib/useThemeColor";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useServerConfigs } from "../../state/entities";
 import { orchestrationEnvironment } from "../../state/orchestration";
@@ -39,7 +38,6 @@ function errorMessage(value: unknown): string {
 export function ExternalConversationImportRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const iconColor = useThemeColor("--color-icon");
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const { savedConnectionsById } = useSavedRemoteConnections();
@@ -221,7 +219,12 @@ export function ExternalConversationImportRouteScreen() {
                 <ActivityIndicator size="small" />
               ) : conversation.importedThreadId ? (
                 <View className="flex-row items-center gap-1">
-                  <SymbolView name="checkmark" size={12} tintColor={iconColor} type="monochrome" />
+                  <SymbolView
+                    name="checkmark"
+                    size={12}
+                    tintColorClassName="accent-icon"
+                    type="monochrome"
+                  />
                   <Text className="text-xs font-t3-medium text-foreground-muted">Imported</Text>
                 </View>
               ) : (
@@ -232,7 +235,7 @@ export function ExternalConversationImportRouteScreen() {
         </Pressable>
       );
     },
-    [handleConversationPress, iconColor, importingKey, projectId],
+    [handleConversationPress, importingKey, projectId],
   );
 
   const listHeader = (
@@ -279,7 +282,12 @@ export function ExternalConversationImportRouteScreen() {
         </ControlPillMenu>
       </View>
       <View className="h-11 flex-row items-center gap-2.5 rounded-2xl bg-input px-3.5">
-        <SymbolView name="magnifyingglass" size={17} tintColor={iconColor} type="monochrome" />
+        <SymbolView
+          name="magnifyingglass"
+          size={17}
+          tintColorClassName="accent-icon"
+          type="monochrome"
+        />
         <TextInput
           accessibilityLabel="Search external conversations"
           autoCapitalize="none"
