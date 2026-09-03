@@ -64,6 +64,7 @@ import Migration0049 from "./Migrations/049_ProjectionQueuedTurns.ts";
 import Migration0050 from "./Migrations/050_BackfillClaudeProviderThreadIds.ts";
 import Migration0051 from "./Migrations/051_BackfillCodexProviderThreadIds.ts";
 import Migration0052 from "./Migrations/052_SelfHostedPushDevices.ts";
+import Migration0053 from "./Migrations/053_RepairForkMigrationCollisions.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -128,6 +129,7 @@ export const migrationEntries = [
   [50, "BackfillClaudeProviderThreadIds", Migration0050],
   [51, "BackfillCodexProviderThreadIds", Migration0051],
   [52, "SelfHostedPushDevices", Migration0052],
+  [53, "RepairForkMigrationCollisions", Migration0053],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
