@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -207,6 +207,10 @@ import {
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
+import {
+  ProviderConsumeResetCreditInput,
+  ProviderConsumeResetCreditResult,
+} from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -244,6 +248,7 @@ export const WS_METHODS = {
   // Provider methods
   providerUploadFeedback: "provider.uploadFeedback",
   providerAuthStart: "provider.auth.start",
+  providerConsumeResetCredit: "provider.consumeResetCredit",
   providerAuthComplete: "provider.auth.complete",
   providerAuthCancel: "provider.auth.cancel",
   providerAuthLogout: "provider.auth.logout",
@@ -339,6 +344,7 @@ export const WS_METHODS = {
   pullRequestsSetThreadResolution: "pullRequests.setThreadResolution",
   pullRequestsSetReaction: "pullRequests.setReaction",
   pullRequestsInvalidate: "pullRequests.invalidate",
+  pullRequestsSubscribeRefreshes: "pullRequests.subscribeRefreshes",
   pullRequestsReviewerCandidates: "pullRequests.reviewerCandidates",
   pullRequestsRequestReviewers: "pullRequests.requestReviewers",
   pullRequestsLabelCandidates: "pullRequests.labelCandidates",
@@ -410,6 +416,12 @@ export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvide
 });
 
 const ProviderSetupRpcError = Schema.Union([ProviderSetupError, EnvironmentAuthorizationError]);
+
+export const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeResetCredit, {
+  payload: ProviderConsumeResetCreditInput,
+  success: ProviderConsumeResetCreditResult,
+  error: ProviderSetupRpcError,
+});
 
 export const WsProviderAuthStartRpc = Rpc.make(WS_METHODS.providerAuthStart, {
   payload: ProviderSetupInput,
@@ -703,6 +715,16 @@ export const WsPullRequestsInvalidateRpc = Rpc.make(WS_METHODS.pullRequestsInval
   success: Schema.Void,
   error: PullRequestRpcError,
 });
+
+export const WsPullRequestsSubscribeRefreshesRpc = Rpc.make(
+  WS_METHODS.pullRequestsSubscribeRefreshes,
+  {
+    payload: Schema.Struct({}),
+    success: NonNegativeInt,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  },
+);
 
 /**
  * Read on its own rather than as part of the detail: the people who may be asked are only wanted
@@ -1135,6 +1157,8 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
      * dropped by old servers.
      */
     environmentThemes: Schema.optional(Schema.Boolean),
+    /** Whether this client understands `usageLimitSourcesUpdated` events. */
+    usageLimitSources: Schema.optional(Schema.Boolean),
   }),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
@@ -1174,6 +1198,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
+  WsProviderConsumeResetCreditRpc,
   WsProviderAuthStartRpc,
   WsProviderAuthCompleteRpc,
   WsProviderAuthCancelRpc,
@@ -1220,6 +1245,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsSetThreadResolutionRpc,
   WsPullRequestsSetReactionRpc,
   WsPullRequestsInvalidateRpc,
+  WsPullRequestsSubscribeRefreshesRpc,
   WsPullRequestsReviewerCandidatesRpc,
   WsPullRequestsRequestReviewersRpc,
   WsPullRequestsLabelCandidatesRpc,

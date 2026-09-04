@@ -224,9 +224,18 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               )
             : commandReadModel;
 
+        // Command snapshots omit activities at startup and cap them while running.
+        // Read this request's durable state before deciding how to send the answer.
+        const userInputActivity =
+          envelope.command.type === "thread.user-input.respond"
+            ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
+            : Option.none();
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel: decisionReadModel,
+          ...(Option.isSome(userInputActivity)
+            ? { userInputActivity: userInputActivity.value }
+            : {}),
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),
           Effect.mapError((cause) =>
@@ -401,6 +410,19 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const readEvents: OrchestrationEngineShape["readEvents"] = (fromSequenceExclusive, limit) =>
     eventStore.readFromSequence(fromSequenceExclusive, limit);
 
+  const readThreadEvents: OrchestrationEngineShape["readThreadEvents"] = ({ threadId, ...range }) =>
+    eventStore.readAggregateRange({ ...range, aggregateKind: "thread", aggregateId: threadId });
+
+  const getThreadReplayStats: OrchestrationEngineShape["getThreadReplayStats"] = ({
+    threadId,
+    ...range
+  }) =>
+    eventStore.getAggregateReplayStats({
+      ...range,
+      aggregateKind: "thread",
+      aggregateId: threadId,
+    });
+
   const dispatch: OrchestrationEngineShape["dispatch"] = (command, options) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
@@ -415,6 +437,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   return {
     readEvents,
+    readThreadEvents,
+    getThreadReplayStats,
     dispatch,
     subscribeDomainEvents: PubSub.subscribe(eventPubSub).pipe(Effect.map(Stream.fromSubscription)),
     // Each access creates a fresh PubSub subscription so that multiple
