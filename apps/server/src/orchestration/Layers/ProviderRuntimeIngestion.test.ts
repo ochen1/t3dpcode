@@ -144,6 +144,7 @@ function createProviderServiceHarness() {
       });
     },
     rollbackConversation: () => unsupported(),
+    forkConversation: () => unsupported(),
     uploadFeedback: () => unsupported(),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub).pipe(
@@ -3932,6 +3933,24 @@ describe("ProviderRuntimeIngestion", () => {
       (entry) => entry.title === "Renamed by provider",
     );
     expect(thread.title).toBe("Renamed by provider");
+  });
+
+  it("does not create provider diff placeholders when Git checkpointing is disabled", async () => {
+    const harness = await createHarness({ serverSettings: { enableGitCheckpointing: false } });
+
+    harness.emit({
+      type: "turn.diff.updated",
+      eventId: asEventId("evt-disabled-turn-diff"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-disabled-diff"),
+      payload: { unifiedDiff: "diff --git a/file.txt b/file.txt\n+hello\n" },
+    });
+    await harness.drain();
+
+    const snapshot = await harness.readModel();
+    expect(snapshot.threads[0]?.checkpoints).toEqual([]);
   });
 
   it("rejects a provider title once the thread has a real title", async () => {

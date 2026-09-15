@@ -537,6 +537,7 @@ export function buildLocalDraftThread(
     interactionMode: draftThread.interactionMode,
     session: null,
     messages: [],
+    queuedTurns: [],
     createdAt: draftThread.createdAt,
     updatedAt: draftThread.createdAt,
     archivedAt: null,
@@ -556,6 +557,7 @@ export function buildLocalDraftThread(
 export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
   return {
     ...shell,
+    queuedTurns: [],
     messages: [],
     proposedPlans: [],
     activities: [],

@@ -66,11 +66,22 @@ import {
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
 } from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
+import {
+  readProject,
+  setActiveEnvironmentId,
+  useActiveEnvironmentId,
+  useThreadShells,
+} from "../state/entities";
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
 } from "../components/KeybindingsUpdateToast.logic";
+import {
+  collectAgentCompletionSnapshot,
+  hasNewAgentCompletion,
+  playAgentCompletionSound,
+  type AgentCompletionSnapshot,
+} from "../agentCompletionSound";
 
 import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
 import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
@@ -311,6 +322,27 @@ function FontAppearanceSync() {
     fontSizePrompt,
     fontSmoothing,
   ]);
+
+  return null;
+}
+
+function AgentCompletionSoundCoordinator() {
+  const enabled = useClientSettings((settings) => settings.playSoundOnAgentCompletion);
+  const threads = useThreadShells();
+  const snapshotRef = useRef<AgentCompletionSnapshot | null>(null);
+
+  useEffect(() => {
+    const nextSnapshot = collectAgentCompletionSnapshot(threads);
+    const previousSnapshot = snapshotRef.current;
+    snapshotRef.current = nextSnapshot;
+
+    if (!enabled || previousSnapshot === null) {
+      return;
+    }
+    if (hasNewAgentCompletion(previousSnapshot, nextSnapshot)) {
+      playAgentCompletionSound();
+    }
+  }, [enabled, threads]);
 
   return null;
 }

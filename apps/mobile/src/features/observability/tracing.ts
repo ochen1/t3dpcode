@@ -1,7 +1,4 @@
-import Constants from "expo-constants";
-import { makeRelayClientTracingLayer } from "@t3tools/shared/relayTracing";
-
-import { hasTracingPublicConfig, resolveCloudPublicConfig } from "../cloud/publicConfig";
+import * as Layer from "effect/Layer";
 
 export interface TracingConfig {
   readonly tracesUrl: string;
@@ -15,27 +12,13 @@ export interface TracingResource {
 }
 
 export function resolveTracingConfig(): TracingConfig | null {
-  const config = resolveCloudPublicConfig();
-  if (!hasTracingPublicConfig(config)) {
-    return null;
-  }
-  const { tracesUrl, tracesDataset, tracesToken } = config.observability;
-  return { tracesUrl, tracesDataset, tracesToken };
+  return null;
 }
 
 export function makeTracingLayer(config: TracingConfig | null, resource: TracingResource) {
-  return makeRelayClientTracingLayer(config, {
-    serviceName: "t3-mobile-relay-client",
-    serviceVersion: resource.serviceVersion,
-    runtime: "react-native",
-    client: `mobile-${resource.appVariant}`,
-  });
+  void config;
+  void resource;
+  return Layer.empty;
 }
 
-export const tracingLayer = makeTracingLayer(resolveTracingConfig(), {
-  serviceVersion: Constants.expoConfig?.version,
-  appVariant:
-    typeof Constants.expoConfig?.extra?.appVariant === "string"
-      ? Constants.expoConfig.extra.appVariant
-      : "unknown",
-});
+export const tracingLayer = Layer.empty;

@@ -20,6 +20,9 @@ import {
   ThreadPullRequestUnlinkedPayload as ContractsThreadPullRequestUnlinkedPayloadSchema,
   ThreadPullRequestSyncedPayload as ContractsThreadPullRequestSyncedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
+  ThreadQueuedTurnEnqueuedPayload as ContractsThreadQueuedTurnEnqueuedPayloadSchema,
+  ThreadQueuedTurnRemovedPayload as ContractsThreadQueuedTurnRemovedPayloadSchema,
+  ThreadQueuedTurnSteerRequestedPayload as ContractsThreadQueuedTurnSteerRequestedPayloadSchema,
   ThreadProposedPlanUpsertedPayload as ContractsThreadProposedPlanUpsertedPayloadSchema,
   ThreadSessionSetPayload as ContractsThreadSessionSetPayloadSchema,
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
@@ -56,6 +59,10 @@ export const ThreadPullRequestUnlinkedPayload = ContractsThreadPullRequestUnlink
 export const ThreadPullRequestSyncedPayload = ContractsThreadPullRequestSyncedPayloadSchema;
 
 export const MessageSentPayloadSchema = ContractsThreadMessageSentPayloadSchema;
+export const ThreadQueuedTurnEnqueuedPayload = ContractsThreadQueuedTurnEnqueuedPayloadSchema;
+export const ThreadQueuedTurnRemovedPayload = ContractsThreadQueuedTurnRemovedPayloadSchema;
+export const ThreadQueuedTurnSteerRequestedPayload =
+  ContractsThreadQueuedTurnSteerRequestedPayloadSchema;
 export const ThreadProposedPlanUpsertedPayload = ContractsThreadProposedPlanUpsertedPayloadSchema;
 export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
 export const ThreadTurnDiffCompletedPayload = ContractsThreadTurnDiffCompletedPayloadSchema;

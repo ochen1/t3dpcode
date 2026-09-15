@@ -249,6 +249,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerQueuedHeader, shouldShowComposerQueuedHeader } from "./ComposerQueuedHeader";
 import {
   ComposerControl,
   ComposerControlIcon,
@@ -1167,8 +1168,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   hasSendableContent: boolean;
+  canQueueWhileRunning: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
+  onCancelPendingAction: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onCompactContext?: (() => void) | undefined;
@@ -1200,8 +1203,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        canQueueWhileRunning={props.canQueueWhileRunning}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
+        onCancelPendingAction={props.onCancelPendingAction}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
       />
@@ -1397,6 +1402,9 @@ export interface ChatComposerProps {
   onCompactContext: () => void;
   onSend: (e?: { preventDefault: () => void }, intent?: ComposerSubmissionIntent) => void;
   onInterrupt: () => void;
+  onCancelPendingUserInput: () => void;
+  onSteerQueuedTurn: (queuedTurn: OrchestrationQueuedTurn) => void;
+  onRemoveQueuedTurn: (queuedTurn: OrchestrationQueuedTurn) => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
@@ -1506,6 +1514,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onCompactContext,
     onSend,
     onInterrupt,
+    onCancelPendingUserInput,
+    onSteerQueuedTurn,
+    onRemoveQueuedTurn,
     onImplementPlanInNewThread,
     onRespondToApproval,
     onSelectActivePendingUserInputOption,
@@ -2469,6 +2480,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isChoiceOnlyPendingQuestion =
     activePendingProgress?.activeQuestion?.allowCustomAnswer === false;
   const showComposerTopDrawer =
+    shouldShowComposerQueuedHeader({
+      queuedTurnCount: queuedTurns.length,
+      isComposerCollapsedMobile,
+    }) ||
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
@@ -2615,6 +2630,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       attachmentTargetKey,
     ],
   );
+  const canQueueWhileRunning =
+    phase === "running" &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    composerSendState.hasSendableContent;
   const collapsedComposerPrimaryActionDisabled =
     phase === "running" ||
     isSendBusy ||
@@ -6004,6 +6024,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-top-drawer="true"
                 variant={activePendingApproval ? "warning" : "info"}
               >
+                {shouldShowComposerQueuedHeader({
+                  queuedTurnCount: queuedTurns.length,
+                  isComposerCollapsedMobile,
+                }) ? (
+                  <ComposerQueuedHeader
+                    queuedTurns={queuedTurns}
+                    onSteer={onSteerQueuedTurn}
+                    onRemove={onRemoveQueuedTurn}
+                  />
+                ) : null}
                 {activePendingApproval ? (
                   <ComposerBanner.Row
                     layout="wrap-actions"
@@ -6105,8 +6135,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               }
                               isPreparingWorktree={false}
                               hasSendableContent={false}
+                              canQueueWhileRunning={false}
                               preserveComposerFocusOnPointerDown
                               onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                              onCancelPendingAction={onCancelPendingUserInput}
                               onInterrupt={handleInterruptPrimaryAction}
                               onImplementPlanInNewThread={
                                 handleImplementPlanInNewThreadPrimaryAction
@@ -6735,8 +6767,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       }
                       isPreparingWorktree={false}
                       hasSendableContent={false}
+                      canQueueWhileRunning={false}
                       preserveComposerFocusOnPointerDown
                       onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                      onCancelPendingAction={onCancelPendingUserInput}
                       onInterrupt={handleInterruptPrimaryAction}
                       onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                     />
@@ -6844,8 +6878,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     isPreparingWorktree={isPreparingWorktree}
                     hasSendableContent={composerSendState.hasSendableContent}
+                    canQueueWhileRunning={canQueueWhileRunning}
                     preserveComposerFocusOnPointerDown={isMobileViewport || isComposerResting}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
+                    onCancelPendingAction={onCancelPendingUserInput}
                     onInterrupt={handleInterruptPrimaryAction}
                     onImplementPlanInNewThread={handleImplementPlanInNewThreadPrimaryAction}
                     compactDisabled={

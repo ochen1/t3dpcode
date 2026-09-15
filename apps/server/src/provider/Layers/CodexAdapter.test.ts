@@ -104,6 +104,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     }),
   );
 
+  public readonly forkThreadImpl = vi.fn((_throughTurnId?: TurnId) =>
+    Promise.resolve({ threadId: "provider-thread-fork", requireResume: true }),
+  );
+
   public readonly uploadFeedbackImpl = vi.fn((_reason?: string) =>
     Promise.resolve({ threadId: "provider-thread-1" }),
   );
@@ -144,6 +148,10 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
 
   rollbackThread(numTurns: number) {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
+  }
+
+  forkThread(throughTurnId?: TurnId) {
+    return Effect.promise(() => this.forkThreadImpl(throughTurnId));
   }
 
   uploadFeedback(reason?: string) {
@@ -445,6 +453,33 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "priority",
       });
+    }),
+  );
+
+  it.effect("forks Codex through app-server so structured tool items are retained", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("sess-fork-source");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const throughTurnId = TurnId.make("provider-turn-with-tools");
+
+      const fork = yield* adapter.forkThread!(threadId, throughTurnId);
+
+      NodeAssert.deepStrictEqual(runtime.forkThreadImpl.mock.calls, [[throughTurnId]]);
+      NodeAssert.deepStrictEqual(fork, {
+        resumeCursor: { threadId: "provider-thread-fork", requireResume: true },
+      });
+      NodeAssert.equal(runtime.closeImpl.mock.calls.length, 1);
+      NodeAssert.equal(
+        (yield* adapter.listSessions()).some((session) => session.threadId === threadId),
+        false,
+      );
     }),
   );
 

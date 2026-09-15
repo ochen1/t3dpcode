@@ -59,6 +59,7 @@ function makeReadModel(
         pinnedAt: lifecycle.pinnedAt ?? null,
         deletedAt: null,
         messages,
+        queuedTurns: [],
         proposedPlans: [],
         activities,
         checkpoints: [],

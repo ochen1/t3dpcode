@@ -65,6 +65,7 @@ import { ProviderValidationError } from "../../provider/Errors.ts";
 import { ServerConfig } from "../../config.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
@@ -137,6 +138,7 @@ function createProviderServiceHarness(
         },
       }),
     rollbackConversation,
+    forkConversation: () => unsupported(),
     uploadFeedback: () => unsupported(),
     get streamEvents() {
       return Stream.fromPubSub(runtimeEventPubSub);
@@ -301,6 +303,7 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
+    readonly enableGitCheckpointing?: boolean;
     readonly pullRequestRefreshCalls?: Array<string>;
     readonly pullRequestRefresh?: Effect.Effect<void>;
   }) {
@@ -378,6 +381,11 @@ describe("CheckpointReactor", () => {
       ),
       Layer.provideMerge(WorkspacePaths.layer),
       Layer.provideMerge(VcsProcess.layer),
+      Layer.provideMerge(
+        ServerSettingsService.layerTest({
+          enableGitCheckpointing: options?.enableGitCheckpointing ?? true,
+        }),
+      ),
       Layer.provideMerge(ServerConfigLayer),
       Layer.provideMerge(NodeServices.layer),
     );

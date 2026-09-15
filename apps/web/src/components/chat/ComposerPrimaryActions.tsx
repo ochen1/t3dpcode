@@ -1,5 +1,5 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronLeftIcon, CornerDownRightIcon } from "lucide-react";
 import { useEnvironmentIdentificationMode } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
@@ -28,8 +28,10 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  canQueueWhileRunning?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   onPreviousPendingQuestion: () => void;
+  onCancelPendingAction?: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
@@ -68,8 +70,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  canQueueWhileRunning = false,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
+  onCancelPendingAction,
   onInterrupt,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
@@ -106,7 +110,18 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
-        {isRunning ? renderStopGenerationButton(true) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-full"
+          {...pointerFocusProps}
+          onClick={onCancelPendingAction ?? onInterrupt}
+          disabled={pendingAction.isResponding || isEnvironmentUnavailable}
+          aria-label="Cancel input and stop generation"
+        >
+          Cancel
+        </Button>
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -276,7 +291,20 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   // While a turn runs, a sendable draft queues for the next tool boundary, so
   // the send button stays next to Stop on every viewport.
   return (
-    <>
+    <div className="flex items-center justify-end gap-2">
+      {canQueueWhileRunning ? (
+        <button
+          type="submit"
+          className="flex size-8 enabled:cursor-pointer items-center justify-center rounded-full bg-primary/90 text-primary-foreground shadow-xs enabled:shadow-primary/24 enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] transition-all duration-150 hover:bg-primary hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100"
+          {...pointerFocusProps}
+          disabled={isSendBusy || isConnecting || isEnvironmentUnavailable || !hasSendableContent}
+          aria-label="Queue message"
+        >
+          <CornerDownRightIcon className="size-3.5" aria-hidden="true" />
+        </button>
+      ) : showSendWhileRunning && hasSendableContent ? (
+        sendButton
+      ) : null}
       {renderStopGenerationButton(false)}
       {hasSendableContent ? sendButton : null}
     </>

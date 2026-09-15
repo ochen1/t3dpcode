@@ -156,6 +156,7 @@ import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
+import { ExternalConversationImportDialog } from "./ExternalConversationImportDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
 import {
@@ -535,7 +536,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, openNewThreadIn, setOpen, toggleMode],
   );
 
   return (
@@ -583,7 +584,9 @@ function CommandPaletteDialog(props: {
           ? "File picker"
           : props.mode === "content"
             ? "Search project contents"
-            : "Command palette"
+            : props.mode === "import"
+              ? "Import conversation"
+              : "Command palette"
       }
       className={cn("overflow-hidden p-0", props.mode === "content" && "h-105")}
       data-command-palette="true"
@@ -601,6 +604,11 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
+      ) : props.mode === "import" ? (
+        <ExternalConversationImportDialog
+          onBack={() => props.openOverlayMode("command")}
+          onClose={() => props.setOpen(false)}
+        />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}
@@ -1686,6 +1694,21 @@ function OpenCommandPaletteDialog(props: {
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
     });
+
+    if (hasExternalConversationImport) {
+      actionItems.push({
+        kind: "action",
+        value: "action:import-conversation",
+        searchTerms: ["import conversation", "claude code", "codex", "history", "external"],
+        title: "Import conversation",
+        description: "Claude Code or Codex",
+        icon: <ImportIcon className={ITEM_ICON_CLASS} />,
+        keepOpen: true,
+        run: async () => {
+          openOverlayMode("import");
+        },
+      });
+    }
   }
 
   if (activeThreadReferenceCopyTarget !== null) {

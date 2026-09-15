@@ -257,6 +257,15 @@ function makeFakeCodexAdapter(
       Effect.succeed({ threadId, turns: [] }),
   );
 
+  const forkThread = vi.fn((threadId: ThreadId, throughTurnId?: TurnId) =>
+    Effect.succeed({
+      resumeCursor: {
+        threadId: `fork-of-${threadId}`,
+        ...(throughTurnId !== undefined ? { throughTurnId } : {}),
+      },
+    }),
+  );
+
   const uploadFeedback = vi.fn(
     (
       input: ProviderUploadFeedbackInput,
@@ -294,6 +303,7 @@ function makeFakeCodexAdapter(
     hasSession,
     readThread,
     rollbackThread,
+    forkThread,
     ...(provider === CODEX_DRIVER ? { uploadFeedback } : {}),
     stopAll,
     get streamEvents() {
@@ -331,6 +341,7 @@ function makeFakeCodexAdapter(
     hasSession,
     readThread,
     rollbackThread,
+    forkThread,
     uploadFeedback,
     stopAll,
   };

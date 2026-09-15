@@ -5,10 +5,10 @@ import * as NodePath from "node:path";
 
 import {
   ApprovalRequestId,
-  EventId,
   CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -334,6 +334,7 @@ describe("OrchestrationEngine", () => {
 
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
     let nextSequence = 8;
+    const appendedEventTypes: Array<OrchestrationEvent["type"]> = [];
     const eventStore: OrchestrationEventStoreShape = {
       append: (event) =>
         Effect.sync(() => {
@@ -341,6 +342,7 @@ describe("OrchestrationEngine", () => {
             ...event,
             sequence: nextSequence,
           } as OrchestrationEvent;
+          appendedEventTypes.push(savedEvent.type);
           nextSequence += 1;
           return savedEvent;
         }),
@@ -396,9 +398,30 @@ describe("OrchestrationEngine", () => {
           settledOverride: null,
           settledAt: null,
           deletedAt: null,
-          messages: [],
+          messages: [
+            {
+              id: asMessageId("assistant-bootstrap"),
+              role: "assistant" as const,
+              text: "Persisted response",
+              turnId: asTurnId("turn-bootstrap"),
+              streaming: false,
+              createdAt: "2026-03-03T00:00:02.500Z",
+              updatedAt: "2026-03-03T00:00:02.500Z",
+            },
+          ],
+          queuedTurns: [],
           proposedPlans: [],
-          activities: [],
+          activities: [
+            {
+              id: EventId.make("activity-bootstrap-tool"),
+              tone: "tool" as const,
+              kind: "tool.completed",
+              summary: "Persisted tool call",
+              payload: { itemType: "command_execution", output: "preserved" },
+              turnId: asTurnId("turn-bootstrap"),
+              createdAt: "2026-03-03T00:00:02.250Z",
+            },
+          ],
           checkpoints: [],
           session: null,
         },
@@ -455,7 +478,7 @@ describe("OrchestrationEngine", () => {
           getThreadRuntimeContext: () => Effect.die("unused"),
           getTurnStartMessage: () => Effect.die("unused"),
           getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
+          getThreadDetailById: () => Effect.succeed(Option.some(projectionSnapshot.threads[0]!)),
           getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
           searchThreads: () => Effect.succeed({ matches: [] }),
         }),
@@ -490,6 +513,25 @@ describe("OrchestrationEngine", () => {
     expect(result.sequence).toBe(8);
     expect(await runtime.runPromise(engine.latestSequence)).toBe(8);
     expect(fullSnapshotReadCount).toBe(0);
+
+    const branchResult = await runtime.runPromise(
+      engine.dispatch({
+        type: "thread.branch",
+        commandId: CommandId.make("cmd-bootstrap-thread-branch"),
+        sourceThreadId: ThreadId.make("thread-bootstrap"),
+        sourceMessageId: asMessageId("assistant-bootstrap"),
+        threadId: ThreadId.make("thread-bootstrap-fork"),
+        createdAt: "2026-03-03T00:01:00.000Z",
+      }),
+    );
+
+    expect(branchResult.sequence).toBe(12);
+    expect(appendedEventTypes.slice(-4)).toEqual([
+      "thread.created",
+      "thread.activity-appended",
+      "thread.message-sent",
+      "thread.branch-requested",
+    ]);
 
     await runtime.dispose();
   });

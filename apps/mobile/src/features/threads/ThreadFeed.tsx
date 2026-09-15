@@ -259,6 +259,9 @@ export interface ThreadFeedProps {
   readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
   readonly onEndFollowEnabledChange?: (enabled: boolean) => void;
   readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
+  readonly canForkThread?: boolean;
+  readonly isForkingThread?: boolean;
+  readonly onForkAssistantMessage?: (messageId: MessageId) => void;
   readonly onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   /** Non-null when older turns exist beyond the loaded window. */
   readonly loadEarlier?: {
@@ -1352,6 +1355,9 @@ function renderFeedEntry(
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly unsettledTurnId: TurnId | null;
+    readonly canForkThread: boolean;
+    readonly isForkingThread: boolean;
+    readonly onForkAssistantMessage: (messageId: MessageId) => void;
     readonly onCopyWorkRow: (rowId: string, value: string) => void;
     readonly onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
     readonly onToggleWorkRow: (rowId: string, anchorKey: string) => void;
@@ -1688,6 +1694,23 @@ function renderFeedEntry(
               buttonSize={28}
               iconSize={13}
             />
+            {props.canForkThread && message.turnId !== null ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Fork from this response"
+                disabled={props.isForkingThread}
+                onPress={() => props.onForkAssistantMessage(message.id)}
+                hitSlop={6}
+                className="size-7 items-center justify-center"
+              >
+                <SymbolView
+                  name="arrow.triangle.branch"
+                  size={13}
+                  tintColor={iconSubtleColor}
+                  type="monochrome"
+                />
+              </Pressable>
+            ) : null}
             <Text className="font-t3-medium text-xs tabular-nums text-adaptive-neutral-600-400">
               {timestampLabel}
             </Text>
@@ -2666,6 +2689,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workGroupScrollPositions,
             terminalAssistantMessageIds,
             unsettledTurnId,
+            canForkThread: props.canForkThread ?? false,
+            isForkingThread: props.isForkingThread ?? false,
+            onForkAssistantMessage: props.onForkAssistantMessage ?? (() => {}),
             onCopyWorkRow,
             onToggleWorkGroup,
             onToggleWorkRow,
@@ -2700,6 +2726,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workGroupScrollPositions,
       terminalAssistantMessageIds,
       unsettledTurnId,
+      props.canForkThread,
+      props.isForkingThread,
+      props.onForkAssistantMessage,
       iconSubtleColor,
       screenColor,
       userBubbleColor,

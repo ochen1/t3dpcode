@@ -4347,23 +4347,33 @@ export default function Sidebar() {
         return;
       }
       if (isMobile) setOpenMobile(false);
-      openCommandPalette({ open: "new-thread-in" });
-    },
-    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
-  );
+      void startNewThreadFromContext({
+        activeDraftThread: newThreadContext.activeDraftThread,
+        activeThread: newThreadContext.activeThread ?? undefined,
+        defaultProjectRef: newThreadContext.defaultProjectRef,
+        handleNewThread: newThreadContext.handleNewThread,
+      });
+      return;
+    }
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "new-thread-in" });
+  }, [isMobile, newThreadContext, projectGroups.length, setOpenMobile]);
+  const handleImportConversationClick = useCallback(() => {
+    if (isMobile) setOpenMobile(false);
+    openCommandPalette({ open: "import-conversation" });
+  }, [isMobile, setOpenMobile]);
 
-  // The button mirrors chat.new: in multi-project setups both route through
-  // the command palette's "New thread in..." picker, and in single-project
-  // setups both create immediately. In multi-project setups the label is only
-  // the picker's shortcut: falling back to chat.newLocal would advertise the
-  // same shortcut for both the picker and direct create. In single-project
-  // setups both commands create directly, so chat.newLocal is a valid
-  // fallback. The second tooltip line (multi-project only) advertises
-  // shift+click and its keyboard twin chat.newLocal for direct create.
+  // The explicit project picker remains available as "New thread in..." in
+  // the command palette.
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const hasExternalConversationImport = projects.some(
+    (project) =>
+      serverConfigs.get(project.environmentId)?.environment.capabilities
+        .externalConversationImport === true,
+  );
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />

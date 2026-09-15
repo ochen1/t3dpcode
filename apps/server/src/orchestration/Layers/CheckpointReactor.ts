@@ -37,6 +37,7 @@ import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import * as PullRequestService from "../../pullRequest/PullRequestService.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -88,6 +89,18 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const serverSettings = yield* ServerSettingsService;
+
+  const gitCheckpointingEnabled = Effect.map(
+    serverSettings.getSettings,
+    (settings) => settings.enableGitCheckpointing,
+  ).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("failed to read Git checkpointing setting", {
+        detail: error.message,
+      }).pipe(Effect.as(true)),
+    ),
+  );
   const pullRequests = yield* PullRequestService.PullRequestService;
   const startedTurns = new Map<ThreadId, TurnId>();
   const pending = new Set<ThreadId>();
@@ -427,6 +440,9 @@ const make = Effect.gen(function* () {
 
   const ensurePreTurnBaselineFromTurnStart = Effect.fn("ensurePreTurnBaselineFromTurnStart")(
     function* (event: Extract<ProviderRuntimeEvent, { type: "turn.started" }>) {
+      if (!(yield* gitCheckpointingEnabled)) {
+        return;
+      }
       const turnId = toTurnId(event.turnId);
       if (!turnId) {
         return;
@@ -629,6 +645,9 @@ const make = Effect.gen(function* () {
       { type: "thread.turn-start-requested" | "thread.message-sent" }
     >,
   ) {
+    if (!(yield* gitCheckpointingEnabled)) {
+      return;
+    }
     if (event.type === "thread.message-sent") {
       // A bootstrap message lands before the worktree exists; its baseline
       // would snapshot the project checkout. The turn-start event that

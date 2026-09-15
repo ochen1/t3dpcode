@@ -9,6 +9,7 @@ import {
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  providerResumeCommand,
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
@@ -30,6 +31,7 @@ import {
   searchSidebarThreads,
   formatWorkingDurationLabel,
   shouldClearThreadSelectionOnMouseDown,
+  shouldCreateNewThreadInCurrentProject,
   shouldRecedeSidebarThread,
   sortLogicalProjectsForSidebar,
   sortSettledThreadsForSidebar,
@@ -51,6 +53,7 @@ import {
   type SidebarSection,
   resolveSidebarDropVerb,
 } from "./Sidebar.logic";
+
 import {
   EnvironmentId,
   OrchestrationLatestTurn,
@@ -2131,6 +2134,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,
     messages: [],
+    queuedTurns: [],
     proposedPlans: [],
     createdAt: "2026-03-09T10:00:00.000Z",
     archivedAt: null,

@@ -28,6 +28,8 @@ import {
   type ProjectId,
   type ProviderApprovalDecision,
   type PreviewAnnotationPayload,
+  type OrchestrationQueuedTurn,
+  QueuedTurnId,
   ProviderInstanceId,
   type ServerProvider,
   type ResolvedKeybindingsConfig,
@@ -1477,6 +1479,7 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const branchThread = useAtomCommand(threadEnvironment.branch, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -1489,6 +1492,15 @@ export default function ChatView(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const enqueueQueuedTurn = useAtomCommand(threadEnvironment.enqueueQueuedTurn, {
+    reportFailure: false,
+  });
+  const removeQueuedTurn = useAtomCommand(threadEnvironment.removeQueuedTurn, {
+    reportFailure: false,
+  });
+  const steerQueuedTurn = useAtomCommand(threadEnvironment.steerQueuedTurn, {
+    reportFailure: false,
+  });
   const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
     refresh: true,
@@ -7705,7 +7717,6 @@ export default function ChatView(props: ChatViewProps) {
       void dockTransition.catch(() => resolveDockStarted?.());
       await dockStarted;
     }
-
     const attachmentCapabilitiesBeforeDispatch = readLiveAttachmentCapabilities();
     if (attachmentCapabilitiesBeforeDispatch.fileBlockReason !== null) {
       sendInFlightRef.current = false;
@@ -7716,11 +7727,6 @@ export default function ChatView(props: ChatViewProps) {
       abortQueuedReplay();
       return;
     }
-    beginLocalDispatch({
-      preparingWorktree: Boolean(baseBranchForWorktree),
-      submissionIntent: resolvedSubmissionIntent,
-    });
-
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const turnAttachmentsPromise = Promise.all(
@@ -7746,6 +7752,107 @@ export default function ChatView(props: ChatViewProps) {
         };
       }),
     );
+    let firstComposerImageName: string | null = null;
+    if (composerImagesSnapshot.length > 0) {
+      const firstComposerImage = composerImagesSnapshot[0];
+      if (firstComposerImage) {
+        firstComposerImageName = firstComposerImage.name;
+      }
+    }
+    let titleSeed = assistantCitationsToPlainText(trimmed);
+    if (!titleSeed) {
+      if (firstComposerImageName) {
+        titleSeed = `Image: ${firstComposerImageName}`;
+      } else if (composerFilesSnapshot[0]) {
+        titleSeed = `File: ${composerFilesSnapshot[0].name}`;
+      } else if (composerTerminalContextsSnapshot.length > 0) {
+        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
+      } else if (composerElementContextsSnapshot.length > 0) {
+        titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
+      } else {
+        titleSeed = "New thread";
+      }
+    }
+    const title = truncate(titleSeed);
+    const threadCreateModelSelection = createModelSelection(
+      ctxSelectedModelSelection.instanceId,
+      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModelSelection.options,
+    );
+    const shouldQueueTurn = phase === "running" && isServerThread && !isLocalDraftThread;
+    if (shouldQueueTurn) {
+      sendInFlightRef.current = true;
+      try {
+        setThreadError(threadIdForSend, null);
+        if (expiredTerminalContextCount > 0) {
+          const toastCopy = buildExpiredTerminalContextToastCopy(
+            expiredTerminalContextCount,
+            "omitted",
+          );
+          toastManager.add(
+            stackedThreadToast({
+              type: "warning",
+              title: toastCopy.title,
+              description: toastCopy.description,
+            }),
+          );
+        }
+
+        let failure: AtomCommandResult<unknown, unknown> | null = null;
+        const turnAttachmentsResult = await settlePromise(() => turnAttachmentsPromise);
+        if (turnAttachmentsResult._tag === "Failure") {
+          failure = turnAttachmentsResult;
+        }
+
+        if (failure === null && turnAttachmentsResult._tag === "Success") {
+          const enqueueResult = await enqueueQueuedTurn({
+            environmentId,
+            input: {
+              threadId: threadIdForSend,
+              queuedTurnId: QueuedTurnId.make(randomUUID()),
+              message: {
+                messageId: messageIdForSend,
+                role: "user",
+                text: outgoingMessageText,
+                attachments: turnAttachmentsResult.value,
+              },
+              modelSelection: ctxSelectedModelSelection,
+              titleSeed: title,
+              runtimeMode,
+              interactionMode,
+              createdAt: messageCreatedAt,
+            },
+          });
+          if (enqueueResult._tag === "Failure") {
+            failure = enqueueResult;
+          }
+        }
+
+        if (failure !== null) {
+          if (!isAtomCommandInterrupted(failure)) {
+            const error = squashAtomCommandFailure(failure);
+            setThreadError(
+              threadIdForSend,
+              error instanceof Error ? error.message : "Failed to queue message.",
+            );
+          }
+          return;
+        }
+
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      } finally {
+        sendInFlightRef.current = false;
+      }
+      return;
+    }
+
+    beginLocalDispatch({
+      preparingWorktree: Boolean(baseBranchForWorktree),
+      submissionIntent: resolvedSubmissionIntent,
+    });
+
     const optimisticAttachments = composerAttachmentsSnapshot.map((attachment) =>
       attachment.type === "image"
         ? {
@@ -8229,6 +8336,46 @@ export default function ChatView(props: ChatViewProps) {
   // of starting a new turn the moment the interrupted one settles.
   restoreQueuedMessagesRef.current = restoreQueuedMessagesToComposer;
 
+  const onRemoveQueuedTurn = useCallback(
+    async (queuedTurn: OrchestrationQueuedTurn) => {
+      const result = await removeQueuedTurn({
+        environmentId,
+        input: {
+          threadId: queuedTurn.threadId,
+          queuedTurnId: queuedTurn.id,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          queuedTurn.threadId,
+          error instanceof Error ? error.message : "Failed to remove queued message.",
+        );
+      }
+    },
+    [environmentId, removeQueuedTurn, setThreadError],
+  );
+
+  const onSteerQueuedTurn = useCallback(
+    async (queuedTurn: OrchestrationQueuedTurn) => {
+      const result = await steerQueuedTurn({
+        environmentId,
+        input: {
+          threadId: queuedTurn.threadId,
+          queuedTurnId: queuedTurn.id,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          queuedTurn.threadId,
+          error instanceof Error ? error.message : "Failed to steer queued message.",
+        );
+      }
+    },
+    [environmentId, setThreadError, steerQueuedTurn],
+  );
+
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
       if (!activeThreadId) return;
@@ -8351,6 +8498,22 @@ export default function ChatView(props: ChatViewProps) {
     },
     [activeThreadId, dismissThreadUserInput, environmentId, setThreadError],
   );
+
+  const onCancelPendingUserInput = useCallback(async () => {
+    if (!activeThread || !activePendingUserInput) return;
+
+    await interruptThreadTurn({
+      environmentId,
+      input: buildThreadTurnInterruptInput(activeThread),
+    });
+    await onRespondToUserInput(activePendingUserInput.requestId, {});
+  }, [
+    activePendingUserInput,
+    activeThread,
+    environmentId,
+    interruptThreadTurn,
+    onRespondToUserInput,
+  ]);
 
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
@@ -9681,6 +9844,9 @@ export default function ChatView(props: ChatViewProps) {
                             onCompactContext={onCompactContext}
                             onSend={onSend}
                             onInterrupt={onInterrupt}
+                            onCancelPendingUserInput={onCancelPendingUserInput}
+                            onSteerQueuedTurn={onSteerQueuedTurn}
+                            onRemoveQueuedTurn={onRemoveQueuedTurn}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={

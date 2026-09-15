@@ -41,6 +41,7 @@ const baseThread: OrchestrationThread = {
   pullRequests: [],
   deletedAt: null,
   messages: [],
+  queuedTurns: [],
   proposedPlans: [],
   activities: [],
   checkpoints: [],

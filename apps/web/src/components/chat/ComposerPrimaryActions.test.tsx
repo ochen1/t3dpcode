@@ -37,7 +37,9 @@ function renderPendingActions(isRunning: boolean) {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: false,
+      canQueueWhileRunning: false,
       onPreviousPendingQuestion: () => {},
+      onCancelPendingAction: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
     }),
@@ -79,7 +81,9 @@ function renderSendButton(sendDisabledReason: string | null = null) {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: true,
+      canQueueWhileRunning: false,
       onPreviousPendingQuestion: () => {},
+      onCancelPendingAction: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
     }),
@@ -99,14 +103,18 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain('aria-label="Sending feedback"');
   });
 
-  it("offers Stop generation while a running turn is waiting for user input", () => {
-    expect(renderPendingActions(true)).toContain('aria-label="Stop generation"');
+  it("offers cancellation while a running turn is waiting for user input", () => {
+    expect(renderPendingActions(true)).toContain('aria-label="Cancel input and stop generation"');
   });
 
-  it("does not offer Stop generation for a pending request without a running turn", () => {
-    expect(renderPendingActions(false)).not.toContain('aria-label="Stop generation"');
+  it("allows a stale pending request to be cancelled without a running turn", () => {
+    expect(renderPendingActions(false)).toContain('aria-label="Cancel input and stop generation"');
   });
 
+  it("keeps the standalone stop action at its normal size", () => {
+    expect(renderStandaloneStop()).toContain("size-8 sm:h-8 sm:w-8");
+    expect(renderStandaloneStop()).not.toContain("sm:size-7");
+  });
   it("renders stage artwork inside the send button when artwork identification is active", () => {
     stageArtworkState.mode = "artwork";
     stageArtworkState.variant = "nightly";

@@ -244,7 +244,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             : Option.none();
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel: commandReadModel,
+          readModel: decisionReadModel,
           ...(Option.isSome(userInputActivity)
             ? { userInputActivity: userInputActivity.value }
             : {}),

@@ -499,6 +499,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               updatedAt: "2026-02-24T00:00:05.000Z",
             },
           ],
+          queuedTurns: [],
           proposedPlans: [
             {
               id: "plan-1",
@@ -536,6 +537,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             threadId: ThreadId.make("thread-1"),
             status: "running",
             providerName: "codex",
+            providerThreadId: "provider-thread-1",
             runtimeMode: "approval-required",
             activeTurnId: asTurnId("turn-1"),
             lastError: null,
@@ -617,6 +619,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             threadId: ThreadId.make("thread-1"),
             status: "running",
             providerName: "codex",
+            providerThreadId: "provider-thread-1",
             runtimeMode: "approval-required",
             activeTurnId: asTurnId("turn-1"),
             lastError: null,
@@ -751,7 +754,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       yield* sql`
         UPDATE projection_thread_sessions
         SET status = 'starting', active_turn_id = NULL, provider_name = 'claudeAgent',
-            provider_instance_id = 'claude-secondary', last_error = 'Starting another session'
+            provider_instance_id = 'claude-secondary', provider_thread_id = 'provider-thread-2',
+            last_error = 'Starting another session'
         WHERE thread_id = 'thread-1'
       `;
       const changedContext = yield* snapshotQuery.getThreadRuntimeContext(
@@ -763,6 +767,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.equal(changedContext.value.session?.activeTurnId, null);
         assert.equal(changedContext.value.session?.providerName, "claudeAgent");
         assert.equal(changedContext.value.session?.providerInstanceId, "claude-secondary");
+        assert.equal(changedContext.value.session?.providerThreadId, "provider-thread-2");
         assert.equal(changedContext.value.session?.lastError, "Starting another session");
       }
     }),

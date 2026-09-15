@@ -1758,6 +1758,11 @@ const make = Effect.gen(function* () {
               ...(event.providerInstanceId !== undefined
                 ? { providerInstanceId: event.providerInstanceId }
                 : {}),
+              ...(event.type === "thread.started" && event.payload.providerThreadId !== undefined
+                ? { providerThreadId: event.payload.providerThreadId }
+                : thread.session?.providerThreadId !== undefined
+                  ? { providerThreadId: thread.session.providerThreadId }
+                  : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: nextActiveTurnId,
               lastError,
@@ -2054,6 +2059,9 @@ const make = Effect.gen(function* () {
               ...(event.providerInstanceId !== undefined
                 ? { providerInstanceId: event.providerInstanceId }
                 : {}),
+              ...(thread.session?.providerThreadId !== undefined
+                ? { providerThreadId: thread.session.providerThreadId }
+                : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               activeTurnId: eventTurnId ?? null,
               lastError: runtimeErrorMessage,
@@ -2079,12 +2087,17 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "turn.diff.updated") {
+        const enableGitCheckpointing = yield* Effect.map(
+          serverSettingsService.getSettings,
+          (settings) => settings.enableGitCheckpointing,
+        );
         const turnId = toTurnId(event.turnId);
-        const checkpointContext = turnId
-          ? yield* projectionSnapshotQuery
-              .getThreadCheckpointContext(thread.id)
-              .pipe(Effect.map(Option.getOrUndefined))
-          : undefined;
+        const checkpointContext =
+          enableGitCheckpointing && turnId
+            ? yield* projectionSnapshotQuery
+                .getThreadCheckpointContext(thread.id)
+                .pipe(Effect.map(Option.getOrUndefined))
+            : undefined;
         const workspaceCwd =
           checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
         if (

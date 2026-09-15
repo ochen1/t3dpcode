@@ -693,6 +693,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "git-checkpointing",
+    title: "Git checkpoints",
+    to: "/settings/source-control",
+  },
+  {
     id: "remote-environments",
     title: "Environments",
     to: "/settings/connections",

@@ -76,6 +76,7 @@ import { useSelectedThreadRequests } from "../../state/use-selected-thread-reque
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { threadEnvironment } from "../../state/threads";
+import { uuidv4 } from "../../lib/uuid";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
@@ -265,6 +266,8 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const branchThread = useAtomCommand(threadEnvironment.branch, { reportFailure: false });
+  const [isForkingThread, setIsForkingThread] = useState(false);
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -532,7 +535,8 @@ function ThreadRouteContent(
   const handleStopThread = useCallback(() => {
     if (
       !selectedThread ||
-      (selectedThread.session?.status !== "running" &&
+      (requests.activePendingUserInput === null &&
+        selectedThread.session?.status !== "running" &&
         selectedThread.session?.status !== "starting")
     ) {
       return;
@@ -541,12 +545,17 @@ function ThreadRouteContent(
       environmentId: selectedThread.environmentId,
       input: {
         threadId: selectedThread.id,
-        ...(selectedThread.session.activeTurnId
+        ...(selectedThread.session?.activeTurnId
           ? { turnId: selectedThread.session.activeTurnId }
           : {}),
       },
     });
-  }, [interruptThreadTurn, selectedThread]);
+  }, [interruptThreadTurn, requests.activePendingUserInput, selectedThread]);
+
+  const handleCancelUserInput = useCallback(async () => {
+    await handleStopThread();
+    await requests.onCancelUserInput();
+  }, [handleStopThread, requests]);
 
   const handleOpenTerminal = useCallback(
     (nextTerminalId?: string | null) => {
@@ -862,6 +871,39 @@ function ThreadRouteContent(
     ],
     [navigation],
   );
+  const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
+  const activeProviderDriver = selectedThread
+    ? serverConfig?.providers.find(
+        (provider) => provider.instanceId === selectedThread.modelSelection.instanceId,
+      )?.driver
+    : undefined;
+  const canForkThread = activeProviderDriver === "claudeAgent" || activeProviderDriver === "codex";
+  const handleForkAssistantMessage = useCallback(
+    async (sourceMessageId: MessageId) => {
+      if (!selectedThread || isForkingThread || !canForkThread) return;
+      const nextThreadId = ThreadId.make(uuidv4());
+      setIsForkingThread(true);
+      const result = await branchThread({
+        environmentId: selectedThread.environmentId,
+        input: {
+          sourceThreadId: selectedThread.id,
+          sourceMessageId,
+          threadId: nextThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      if (result._tag === "Success") {
+        navigation.navigate("Thread", {
+          environmentId: selectedThread.environmentId,
+          threadId: nextThreadId,
+        });
+      } else {
+        Alert.alert("Could not fork thread", "The provider could not fork this response.");
+      }
+      setIsForkingThread(false);
+    },
+    [branchThread, canForkThread, isForkingThread, navigation, selectedThread],
+  );
 
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
@@ -943,6 +985,9 @@ function ThreadRouteContent(
           onRemoveDraftImage={composer.onRemoveDraftImage}
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
+          canForkThread={canForkThread}
+          isForkingThread={isForkingThread}
+          onForkAssistantMessage={handleForkAssistantMessage}
           onSendMessage={composer.onSendMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}

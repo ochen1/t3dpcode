@@ -32,6 +32,7 @@ export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateThreadInput = CommandInput<"thread.create">;
+export type BranchThreadInput = CommandInput<"thread.branch">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
 export type UnarchiveThreadInput = CommandInput<"thread.unarchive">;
@@ -49,6 +50,9 @@ export type UnlinkThreadPullRequestInput = CommandInput<"thread.pull-request.unl
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
+export type EnqueueQueuedTurnInput = CommandInput<"thread.queued-turn.enqueue">;
+export type RemoveQueuedTurnInput = CommandInput<"thread.queued-turn.remove">;
+export type SteerQueuedTurnInput = CommandInput<"thread.queued-turn.steer">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
@@ -131,6 +135,18 @@ export const createThread: (input: CreateThreadInput) => CommandEffect = Effect.
   return yield* dispatch({
     ...input,
     type: "thread.create",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const branchThread: (input: BranchThreadInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.branchThread",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.branch",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });
@@ -304,6 +320,42 @@ export const startThreadTurn: (input: StartThreadTurnInput) => CommandEffect = E
   return yield* dispatch({
     ...input,
     type: "thread.turn.start",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const enqueueQueuedTurn: (input: EnqueueQueuedTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.enqueueQueuedTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.queued-turn.enqueue",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const removeQueuedTurn: (input: RemoveQueuedTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.removeQueuedTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.queued-turn.remove",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const steerQueuedTurn: (input: SteerQueuedTurnInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.steerQueuedTurn",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.queued-turn.steer",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

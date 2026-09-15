@@ -114,6 +114,7 @@ import {
   EyeIcon,
   GitPullRequestIcon,
   GlobeIcon,
+  GitBranchIcon,
   HammerIcon,
   MessageCircleIcon,
   Minimize2Icon,
@@ -2143,6 +2144,25 @@ function AssistantMessageMeta({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
+      {ctx.canForkThread && !message.streaming && message.turnId !== null ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={ctx.isForkingThread}
+                onClick={() => ctx.onForkAssistantMessage(message.id)}
+                aria-label="Fork from this response"
+              />
+            }
+          >
+            <GitBranchIcon className="size-3" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Fork from this response</TooltipPopup>
+        </Tooltip>
+      ) : null}
       {!message.streaming && (
         <Tooltip>
           <TooltipTrigger render={<p className="text-muted-foreground text-xs tabular-nums" />}>

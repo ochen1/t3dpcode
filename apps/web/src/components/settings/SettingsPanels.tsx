@@ -588,6 +588,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
         : []),
+      ...(settings.enableGitCheckpointing !== DEFAULT_UNIFIED_SETTINGS.enableGitCheckpointing
+        ? ["Git checkpoints"]
+        : []),
       ...(settings.continueThreadsAfterServerUpdate !==
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
         ? ["Continue threads after restarts"]
@@ -657,6 +660,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.panelAnimationDurationMs,
       settings.responseStreamingMode,
       settings.enableProviderUpdateChecks,
+      settings.enableGitCheckpointing,
       settings.continueThreadsAfterServerUpdate,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
@@ -758,6 +762,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
+      enableGitCheckpointing: DEFAULT_UNIFIED_SETTINGS.enableGitCheckpointing,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,

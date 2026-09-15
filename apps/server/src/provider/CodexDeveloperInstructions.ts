@@ -211,7 +211,7 @@ export function buildCodexDeveloperInstructions(
     interactionMode === "plan"
       ? codexPlanModeDeveloperInstructions(browserToolsAvailable)
       : codexDefaultModeDeveloperInstructions(browserToolsAvailable);
-  return `${base}
+  return `${base}${T3_CODE_CHAT_HISTORY_INSTRUCTIONS}
 
 ${buildRuntimeInstructions({ harness: "Codex", ...runtime })}`;
 }

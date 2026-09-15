@@ -193,6 +193,16 @@ describe("reduceCommandPaletteUiState", () => {
     expect(
       reduceCommandPaletteUiState(contentOpen, { _tag: "ToggleMode", mode: "content" }),
     ).toEqual({ open: false, mode: "content", openIntent: null });
+
+    const importOpen = reduceCommandPaletteUiState(contentOpen, {
+      _tag: "ToggleMode",
+      mode: "import",
+    });
+    expect(importOpen).toEqual({ open: true, mode: "import", openIntent: null });
+
+    expect(reduceCommandPaletteUiState(importOpen, { _tag: "ToggleMode", mode: "import" })).toEqual(
+      { open: false, mode: "command", openIntent: null },
+    );
   });
 
   it("switches between open modes without closing", () => {
@@ -326,6 +336,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     interactionMode: "default",
     session: null,
     messages: [],
+    queuedTurns: [],
     proposedPlans: [],
     createdAt: "2026-03-01T00:00:00.000Z",
     archivedAt: null,

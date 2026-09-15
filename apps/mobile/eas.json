@@ -40,6 +40,24 @@
         "buildType": "apk"
       }
     },
+    "self-hosted": {
+      "corepack": true,
+      "env": {
+        "APP_VARIANT": "production",
+        "NODE_OPTIONS": "--max-old-space-size=4096",
+        "T3CODE_ANDROID_PACKAGE": "me.oliverchen.t3code",
+        "T3CODE_APP_NAME": "T3 Code Self Hosted",
+        "T3CODE_APP_SCHEME": "t3code-self-hosted",
+        "T3CODE_APP_SLUG": "t3-code-self-hosted",
+        "T3CODE_EAS_PROJECT_ID": "07a57e3c-ad08-4e17-bf9c-29cf234a13d3",
+        "T3CODE_EXPO_OWNER": "oliver-t3-fork",
+        "T3CODE_GOOGLE_SERVICES_FILE": "./google-services.self-hosted.json"
+      },
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "corepack": true,
       "env": {
