@@ -48,6 +48,7 @@ const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const EMPTY_QUEUED_MESSAGES: ReadonlyArray<QueuedComposerMessage> = [];
 const NOOP_QUEUED_MESSAGE_ACTION = (_id: string) => {};
+const NOOP_FORK_ASSISTANT_MESSAGE = (_messageId: MessageId) => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
@@ -268,6 +269,9 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
+  onForkAssistantMessage: (messageId: MessageId) => void;
+  canForkThread: boolean;
+  isForkingThread: boolean;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
@@ -406,6 +410,9 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   supportsConversationRollback: boolean;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
+  onForkAssistantMessage?: (messageId: MessageId) => void;
+  canForkThread?: boolean;
+  isForkingThread?: boolean;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -473,6 +480,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   supportsConversationRollback,
   onRevertToTurnCount,
+  onForkAssistantMessage = NOOP_FORK_ASSISTANT_MESSAGE,
+  canForkThread = false,
+  isForkingThread = false,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   isRevertingCheckpoint,
   onImageExpand,
@@ -923,6 +933,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
+      onForkAssistantMessage,
+      canForkThread,
+      isForkingThread,
       onUseArtifactTemplate,
       onImageExpand,
       onFileOpen,
@@ -955,6 +968,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertToTurnCount,
+      onForkAssistantMessage,
+      canForkThread,
+      isForkingThread,
       onUseArtifactTemplate,
       onImageExpand,
       onFileOpen,

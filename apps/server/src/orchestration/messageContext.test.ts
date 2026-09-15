@@ -58,6 +58,7 @@ function makeReadModel(): OrchestrationReadModel {
         pinnedAt: null,
         deletedAt: null,
         messages: [],
+        queuedTurns: [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],

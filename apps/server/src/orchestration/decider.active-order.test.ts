@@ -50,6 +50,7 @@ function makeReadModel(overrides: Partial<OrchestrationThread> = {}): Orchestrat
         pinOrderKey: null,
         deletedAt: null,
         messages: [],
+        queuedTurns: [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],

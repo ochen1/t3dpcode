@@ -194,7 +194,6 @@ import {
   BrowserPreviewUnavailableError,
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
-import { useAssetUrl } from "../assets/assetUrls";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 
@@ -2210,11 +2209,12 @@ const MarkdownImageFilePreview = memo(function MarkdownImageFilePreview({
   onOpenInBrowser,
   className,
 }: MarkdownImageFilePreviewProps) {
-  const src = useAssetUrl(threadRef.environmentId, {
+  const assetUrl = useAssetUrlState(threadRef.environmentId, {
     _tag: "workspace-file",
     threadId: threadRef.threadId,
     path: imagePath,
   });
+  const src = assetUrl._tag === "Success" ? assetUrl.url : null;
   const [imageState, setImageState] = useState<"loading" | "loaded" | "error">("loading");
 
   useEffect(() => {

@@ -7759,7 +7759,7 @@ export default function ChatView(props: ChatViewProps) {
         firstComposerImageName = firstComposerImage.name;
       }
     }
-    let titleSeed = assistantCitationsToPlainText(trimmed);
+    let titleSeed = assistantCitationsToPlainText(stripInlineContextReferences(trimmed)).trim();
     if (!titleSeed) {
       if (firstComposerImageName) {
         titleSeed = `Image: ${firstComposerImageName}`;
@@ -7767,8 +7767,10 @@ export default function ChatView(props: ChatViewProps) {
         titleSeed = `File: ${composerFilesSnapshot[0].name}`;
       } else if (composerTerminalContextsSnapshot.length > 0) {
         titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
-      } else if (composerElementContextsSnapshot.length > 0) {
-        titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
+      } else if (composerReviewCommentsSnapshot.length > 0) {
+        titleSeed = `Review: ${reviewCommentContextLabel(composerReviewCommentsSnapshot[0]!)}`;
+      } else if (composerPreviewAnnotationsSnapshot.length > 0) {
+        titleSeed = previewAnnotationContextLabel(composerPreviewAnnotationsSnapshot[0]!);
       } else {
         titleSeed = "New thread";
       }
@@ -7776,7 +7778,7 @@ export default function ChatView(props: ChatViewProps) {
     const title = truncate(titleSeed);
     const threadCreateModelSelection = createModelSelection(
       ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProject.defaultModelSelection?.model || DEFAULT_MODEL,
+      ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
       ctxSelectedModelSelection.options,
     );
     const shouldQueueTurn = phase === "running" && isServerThread && !isLocalDraftThread;
@@ -7926,36 +7928,6 @@ export default function ChatView(props: ChatViewProps) {
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
     }
-
-    let firstComposerImageName: string | null = null;
-    if (composerImagesSnapshot.length > 0) {
-      const firstComposerImage = composerImagesSnapshot[0];
-      if (firstComposerImage) {
-        firstComposerImageName = firstComposerImage.name;
-      }
-    }
-    let titleSeed = assistantCitationsToPlainText(stripInlineContextReferences(trimmed)).trim();
-    if (!titleSeed) {
-      if (firstComposerImageName) {
-        titleSeed = `Image: ${firstComposerImageName}`;
-      } else if (composerFilesSnapshot[0]) {
-        titleSeed = `File: ${composerFilesSnapshot[0].name}`;
-      } else if (composerTerminalContextsSnapshot.length > 0) {
-        titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
-      } else if (composerReviewCommentsSnapshot.length > 0) {
-        titleSeed = `Review: ${reviewCommentContextLabel(composerReviewCommentsSnapshot[0]!)}`;
-      } else if (composerPreviewAnnotationsSnapshot.length > 0) {
-        titleSeed = previewAnnotationContextLabel(composerPreviewAnnotationsSnapshot[0]!);
-      } else {
-        titleSeed = "New thread";
-      }
-    }
-    const title = truncate(titleSeed);
-    const threadCreateModelSelection = createModelSelection(
-      ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
-      ctxSelectedModelSelection.options,
-    );
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
     // Auto-title from first message
@@ -8807,6 +8779,49 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const [isForkingThread, setIsForkingThread] = useState(false);
+  const canForkThread =
+    isServerThread &&
+    (activeProviderStatus?.driver === "claudeAgent" || activeProviderStatus?.driver === "codex");
+  const onForkAssistantMessage = useCallback(
+    async (sourceMessageId: MessageId) => {
+      if (!activeThread || !isServerThread || isForkingThread || !canForkThread) return;
+
+      const nextThreadId = newThreadId();
+      setIsForkingThread(true);
+      const branchResult = await branchThread({
+        environmentId: activeThread.environmentId,
+        input: {
+          sourceThreadId: activeThread.id,
+          sourceMessageId,
+          threadId: nextThreadId,
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      if (branchResult._tag === "Success") {
+        const destinationRef = scopeThreadRef(activeThread.environmentId, nextThreadId);
+        await waitForStartedServerThread(destinationRef);
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(destinationRef),
+        });
+      } else if (!isAtomCommandInterrupted(branchResult)) {
+        const error = squashAtomCommandFailure(branchResult);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not fork thread",
+            description:
+              error instanceof Error ? error.message : "The provider could not fork this thread.",
+          }),
+        );
+      }
+      setIsForkingThread(false);
+    },
+    [activeThread, branchThread, canForkThread, isForkingThread, isServerThread, navigate],
+  );
+
   const onImplementPlanInNewThread = useCallback(async () => {
     if (
       !activeThread ||
@@ -9628,6 +9643,9 @@ export default function ChatView(props: ChatViewProps) {
                 onRevertToTurnCount={
                   paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
                 }
+                onForkAssistantMessage={onForkAssistantMessage}
+                canForkThread={!paintOnlyDisplayedTimeline && canForkThread}
+                isForkingThread={isForkingThread}
                 isRevertingCheckpoint={!paintOnlyDisplayedTimeline && isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
@@ -9755,6 +9773,7 @@ export default function ChatView(props: ChatViewProps) {
                             activeThreadId={activeThreadId}
                             activeThreadEnvironmentId={activeThread?.environmentId}
                             activeThread={activeThread}
+                            queuedTurns={activeThread.queuedTurns}
                             activeThreadShell={routeServerThreadShell}
                             promptHistoryMessages={timelineMessages}
                             isServerThread={isServerThread}

@@ -11,5 +11,5 @@ it.effect("keeps analytics disabled", () =>
     yield* analytics.flush;
 
     assert.strictEqual(true, true);
-  }).pipe(Effect.provide(AnalyticsService.layer)),
+  }).pipe(Effect.provide(AnalyticsService.layerTest)),
 );

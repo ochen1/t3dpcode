@@ -465,10 +465,7 @@ describe("ClaudeAdapterLive", () => {
 
       const createInput = harness.getLastCreateQueryInput();
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
-      assert.deepEqual(createInput?.options.additionalDirectories, [
-        "/tmp/claude-adapter-test",
-        "/tmp/userdata/attachments",
-      ]);
+      assert.deepEqual(createInput?.options.additionalDirectories, ["/tmp/userdata/attachments"]);
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
     }).pipe(

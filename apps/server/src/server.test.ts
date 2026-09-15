@@ -520,6 +520,7 @@ const buildAppUnderTest = (options?: {
     keybindings?: Partial<Keybindings.Keybindings["Service"]>;
     environmentTheme?: Partial<EnvironmentTheme.EnvironmentThemeService["Service"]>;
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry["Service"]>;
+    conversationImport?: Partial<ConversationImport.ConversationImport["Service"]>;
     usageLimitSources?: Partial<UsageLimitSources.UsageLimitSources["Service"]>;
     providerService?: Partial<ProviderService.ProviderService["Service"]>;
     providerAuth?: Partial<ProviderAuthService["Service"]>;

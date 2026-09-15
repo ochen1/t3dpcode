@@ -75,6 +75,7 @@ const THREAD: OrchestrationThread = {
   settledAt: null,
   deletedAt: null,
   messages: [],
+  queuedTurns: [],
   proposedPlans: [],
   activities: [],
   checkpoints: [],

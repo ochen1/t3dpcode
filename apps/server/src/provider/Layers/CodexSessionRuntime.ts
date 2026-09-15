@@ -329,7 +329,7 @@ export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedError<
   }
 }
 
-export class CodexSessionRuntimeForkHistoryMissingError extends Schema.TaggedErrorClass<CodexSessionRuntimeForkHistoryMissingError>()(
+export class CodexSessionRuntimeForkHistoryMissingError extends Schema.TaggedError<CodexSessionRuntimeForkHistoryMissingError>()(
   "CodexSessionRuntimeForkHistoryMissingError",
   {
     threadId: Schema.String,
@@ -782,6 +782,7 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly requireResume?: boolean;
 }): Effect.Effect<typeof CodexThreadResumeMetadata.Type, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -816,14 +817,16 @@ export const openCodexThread = (input: {
           ),
         ),
       ),
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+      Effect.catchIf(
+        (error) => input.requireResume !== true && isRecoverableThreadResumeError(error),
+        (error) =>
+          Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+            threadId: input.threadId,
+            requestedRuntimeMode: input.runtimeMode,
+            resumeThreadId,
+            recoverable: true,
+            cause: error,
+          }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
       ),
     );
 };

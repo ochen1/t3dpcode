@@ -149,18 +149,15 @@ export function parsePersistedState(parsed: PersistedUiState): UiState {
   return {
     projectExpandedById,
     projectOrder,
-    sidebarV2ProjectScopeKey:
-      typeof parsed.sidebarV2ProjectScopeKey === "string" &&
-      parsed.sidebarV2ProjectScopeKey.length > 0
-        ? parsed.sidebarV2ProjectScopeKey
-        : null,
     threadLastVisitedAtById: sanitizeTimestampRecord(parsed.threadLastVisitedAtById),
     threadChangedFilesExpandedById:
       parsed.threadChangedFilesExpansionVersion === THREAD_CHANGED_FILES_EXPANSION_VERSION
         ? sanitizePersistedThreadChangedFilesExpanded(parsed.threadChangedFilesExpandedById)
         : {},
     defaultAdvertisedEndpointKey: sanitizeOptionalKey(parsed.defaultAdvertisedEndpointKey),
-    sidebarProjectScopeKey: sanitizeOptionalKey(parsed.sidebarProjectScopeKey),
+    sidebarProjectScopeKey:
+      sanitizeOptionalKey(parsed.sidebarProjectScopeKey) ??
+      sanitizeOptionalKey(parsed.sidebarV2ProjectScopeKey),
     pullRequestMergeMethod: isPullRequestMergeMethod(parsed.pullRequestMergeMethod)
       ? parsed.pullRequestMergeMethod
       : initialState.pullRequestMergeMethod,
@@ -232,7 +229,6 @@ export function persistState(state: UiState): void {
       JSON.stringify({
         projectExpandedById,
         projectOrder: state.projectOrder,
-        sidebarV2ProjectScopeKey: state.sidebarV2ProjectScopeKey,
         threadLastVisitedAtById: state.threadLastVisitedAtById,
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         sidebarProjectScopeKey: state.sidebarProjectScopeKey,
@@ -386,17 +382,6 @@ export function setProjectExpanded(
   };
 }
 
-export function setSidebarV2ProjectScopeKey(state: UiState, key: string | null): UiState {
-  const nextKey = key && key.length > 0 ? key : null;
-  if (state.sidebarV2ProjectScopeKey === nextKey) {
-    return state;
-  }
-  return {
-    ...state,
-    sidebarV2ProjectScopeKey: nextKey,
-  };
-}
-
 export function reorderProjects(
   state: UiState,
   currentProjectOrder: readonly string[],
@@ -449,7 +434,6 @@ interface UiStateStore extends UiState {
   setSidebarProjectScopeKey: (projectKey: string | null) => void;
   setPullRequestMergeMethod: (method: PullRequestMergeMethod) => void;
   setProjectExpanded: (projectIds: string | readonly string[], expanded: boolean) => void;
-  setSidebarV2ProjectScopeKey: (key: string | null) => void;
   reorderProjects: (
     currentProjectOrder: readonly string[],
     draggedProjectIds: readonly string[],
@@ -472,7 +456,6 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setPullRequestMergeMethod: (method) => set((state) => setPullRequestMergeMethod(state, method)),
   setProjectExpanded: (projectIds, expanded) =>
     set((state) => setProjectExpanded(state, projectIds, expanded)),
-  setSidebarV2ProjectScopeKey: (key) => set((state) => setSidebarV2ProjectScopeKey(state, key)),
   reorderProjects: (currentProjectOrder, draggedProjectIds, targetProjectIds) =>
     set((state) =>
       reorderProjects(state, currentProjectOrder, draggedProjectIds, targetProjectIds),

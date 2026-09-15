@@ -410,6 +410,7 @@ describe("streaming row projection", () => {
         ...history.flatMap(({ user, assistant }) => [user, assistant]),
         ...initial.messages,
       ],
+      queuedTurns: [],
       proposedPlans: [],
       activities: [],
       checkpoints: history.map(({ checkpoint }) => checkpoint),

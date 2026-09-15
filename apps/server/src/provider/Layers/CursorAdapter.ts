@@ -43,6 +43,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -539,6 +540,7 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
+          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment || mcpSession?.agentDeviceEnvironment

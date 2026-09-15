@@ -47,6 +47,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitPullRequestArrowIcon,
+  ImportIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -661,6 +662,17 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useProjects();
+  const hasExternalConversationImport = useMemo(() => {
+    const capableEnvironmentIds = new Set(
+      environments
+        .filter(
+          (environment) =>
+            environment.serverConfig?.environment.capabilities.externalConversationImport === true,
+        )
+        .map((environment) => environment.environmentId),
+    );
+    return projects.some((project) => capableEnvironmentIds.has(project.environmentId));
+  }, [environments, projects]);
   const referenceThreadRef =
     pathname === "/pull-requests"
       ? environments.some(

@@ -20,6 +20,7 @@ import type {
   ChatFileAttachment,
   EnvironmentId,
   ModelSelection,
+  OrchestrationQueuedTurn,
   ProjectId,
   PullRequestListInput,
   PreviewAnnotationPayload,
@@ -1296,6 +1297,7 @@ export interface ChatComposerProps {
   activeThreadId: ThreadId | null;
   activeThreadEnvironmentId: EnvironmentId | undefined;
   activeThread: Thread | undefined;
+  queuedTurns: ReadonlyArray<OrchestrationQueuedTurn>;
   /** The routed server thread's shell, present before its detail loads. */
   activeThreadShell: ThreadShell | null;
   /** Timeline messages including optimistic sends, for ArrowUp prompt recall. */
@@ -1454,6 +1456,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
+    queuedTurns,
     promptHistoryMessages,
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,

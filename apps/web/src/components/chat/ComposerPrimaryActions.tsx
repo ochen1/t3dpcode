@@ -302,11 +302,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         >
           <CornerDownRightIcon className="size-3.5" aria-hidden="true" />
         </button>
-      ) : showSendWhileRunning && hasSendableContent ? (
+      ) : hasSendableContent ? (
         sendButton
       ) : null}
       {renderStopGenerationButton(false)}
-      {hasSendableContent ? sendButton : null}
-    </>
+    </div>
   );
 });

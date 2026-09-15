@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("048_BackfillProjectionThreadLatestTurn", (it) => {
+layer("055_BackfillProjectionThreadLatestTurn", (it) => {
   it.effect("restores missing latest turn links without overwriting existing links", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -179,7 +179,7 @@ layer("048_BackfillProjectionThreadLatestTurn", (it) => {
           )
       `;
 
-      yield* runMigrations({ toMigrationInclusive: 48 });
+      yield* runMigrations({ toMigrationInclusive: 55 });
 
       const rows = yield* sql<{
         readonly threadId: string;

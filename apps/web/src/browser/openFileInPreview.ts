@@ -44,6 +44,10 @@ export class BrowserSettingsReadError extends Data.TaggedError("BrowserSettingsR
   }
 }
 
+export class BrowserAssetUrlResolutionError extends Data.TaggedError(
+  "BrowserAssetUrlResolutionError",
+)<{ readonly message: string }> {}
+
 export type OpenPreviewMutation<E = unknown> = (input: {
   readonly environmentId: EnvironmentId;
   readonly input: PreviewOpenInput;
@@ -88,22 +92,7 @@ export async function createWorkspaceFileAssetUrl<AssetError>(input: {
     readonly environmentId: EnvironmentId;
     readonly input: { readonly resource: AssetResource };
   }) => Promise<AtomCommandResult<AssetCreateUrlResult, AssetError>>;
-  readonly openPreview: OpenPreviewMutation<PreviewError>;
-}): Promise<
-  AtomCommandResult<
-    void,
-    AssetError | PreviewError | BrowserPreviewUnavailableError | BrowserSettingsReadError
-  >
-> {
-  if (!isPreviewSupportedInRuntime()) {
-    return AsyncResult.failure(
-      Cause.fail(
-        new BrowserPreviewUnavailableError({
-          message: "The integrated browser is unavailable in this runtime.",
-        }),
-      ),
-    );
-  }
+}): Promise<AtomCommandResult<string, AssetError | BrowserAssetUrlResolutionError>> {
   const insideWorkspace =
     mediaFileReference(input.filePath, input.workspaceRoot).relativePath !== undefined;
   const assetResult = await input.createAssetUrl({
@@ -145,7 +134,11 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
 }): Promise<
   AtomCommandResult<
     void,
-    AssetError | PreviewError | BrowserPreviewUnavailableError | BrowserAssetUrlResolutionError
+    | AssetError
+    | PreviewError
+    | BrowserPreviewUnavailableError
+    | BrowserAssetUrlResolutionError
+    | BrowserSettingsReadError
   >
 > {
   if (!isPreviewSupportedInRuntime()) {

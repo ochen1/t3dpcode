@@ -163,6 +163,11 @@ interface ClaudeResumeState {
   readonly resumeSessionAt?: string;
   readonly turnCount?: number;
   readonly turnStartMessageIds?: ReadonlyArray<string | null>;
+  readonly forkSession?: boolean;
+  readonly resumePoints?: ReadonlyArray<{
+    readonly turnId: TurnId;
+    readonly resumeSessionAt: string;
+  }>;
 }
 
 interface ClaudeTurnState {
@@ -884,6 +889,8 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     resumeSessionAt?: unknown;
     turnCount?: unknown;
     turnStartMessageIds?: unknown;
+    forkSession?: unknown;
+    resumePoints?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -906,6 +913,22 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     cursor.turnStartMessageIds.every((id: unknown) => id === null || typeof id === "string")
       ? (cursor.turnStartMessageIds as Array<string | null>)
       : undefined;
+  const forkSession = cursor.forkSession === true;
+  const resumePoints = Array.isArray(cursor.resumePoints)
+    ? cursor.resumePoints.flatMap((point) => {
+        if (
+          typeof point !== "object" ||
+          point === null ||
+          !("turnId" in point) ||
+          typeof point.turnId !== "string" ||
+          !("resumeSessionAt" in point) ||
+          typeof point.resumeSessionAt !== "string"
+        ) {
+          return [];
+        }
+        return [{ turnId: TurnId.make(point.turnId), resumeSessionAt: point.resumeSessionAt }];
+      })
+    : undefined;
 
   return {
     ...(threadId ? { threadId } : {}),
@@ -4836,6 +4859,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(resumeState?.turnStartMessageIds
             ? { turnStartMessageIds: resumeState.turnStartMessageIds }
             : {}),
+          ...(resumeState?.resumePoints ? { resumePoints: resumeState.resumePoints } : {}),
         },
         createdAt: startedAt,
         updatedAt: startedAt,
@@ -5354,6 +5378,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           resume: sourceSessionId,
           ...(resumeSessionAt ? { resumeSessionAt } : {}),
           turnCount,
+          turnStartMessageIds: context.turnStartMessageIds.slice(0, turnCount),
           resumePoints: context.turns.flatMap((turn) =>
             turn.resumeSessionAt
               ? [{ turnId: turn.id, resumeSessionAt: turn.resumeSessionAt }]

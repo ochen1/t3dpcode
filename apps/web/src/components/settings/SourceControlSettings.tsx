@@ -427,8 +427,8 @@ function GitFetchIntervalSettings() {
 }
 
 function GitCheckpointingSettings() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsSection title="Checkpointing">

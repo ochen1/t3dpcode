@@ -198,12 +198,11 @@ describe("parsePersistedState", () => {
         logical: false,
       },
       projectOrder: ["physical-b", "physical-a"],
-      sidebarV2ProjectScopeKey: "logical-project",
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKey: "logical-project",
       pullRequestMergeMethod: "merge",
       threadChangedFilesExpandedById: {
         "environment:thread-1": {
@@ -299,7 +298,7 @@ describe("uiStateStore persistence", () => {
         logical: false,
       },
       projectOrder: ["physical-b", "physical-a"],
-      sidebarV2ProjectScopeKey: "logical-project",
+      sidebarProjectScopeKey: "logical-project",
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
@@ -322,12 +321,11 @@ describe("uiStateStore persistence", () => {
         logical: false,
       },
       projectOrder: ["physical-b", "physical-a"],
-      sidebarV2ProjectScopeKey: "logical-project",
       threadLastVisitedAtById: {
         "environment:thread-1": "2026-02-25T12:35:00.000Z",
       },
       defaultAdvertisedEndpointKey: "desktop-core:lan:http",
-      sidebarProjectScopeKey: null,
+      sidebarProjectScopeKey: "logical-project",
       threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
         "environment:thread-1": {

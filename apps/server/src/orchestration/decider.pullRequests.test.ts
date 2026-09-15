@@ -94,6 +94,7 @@ function makeReadModel(pullRequests: ReadonlyArray<ThreadPullRequestLink>): Orch
         settledAt: null,
         deletedAt: null,
         messages: [],
+        queuedTurns: [],
         proposedPlans: [],
         activities: [],
         checkpoints: [],

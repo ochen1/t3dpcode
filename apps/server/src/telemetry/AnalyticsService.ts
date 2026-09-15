@@ -1,6 +1,48 @@
+/**
+ * Anonymous PostHog telemetry service.
+ *
+ * Persists an installation-scoped anonymous identifier, buffers events in
+ * memory, and flushes batches over Effect's HTTP client.
+ *
+ * @module AnalyticsService
+ */
+import type { ClientOs } from "@t3tools/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Config from "effect/Config";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+
+import packageJson from "../../package.json" with { type: "json" };
+import * as ServerConfig from "../config.ts";
+import { getTelemetryIdentifier } from "./Identify.ts";
+
+interface BufferedAnalyticsEvent {
+  readonly event: string;
+  readonly properties?: Readonly<Record<string, unknown>>;
+  readonly capturedAt: string;
+}
+
+const TelemetryEnvConfig = Config.all({
+  posthogKey: Config.string("T3CODE_POSTHOG_KEY").pipe(
+    Config.withDefault("phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
+  ),
+  posthogHost: Config.string("T3CODE_POSTHOG_HOST").pipe(
+    Config.withDefault("https://us.i.posthog.com"),
+  ),
+  enabled: Config.boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
+  flushBatchSize: Config.number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
+  maxBufferedEvents: Config.number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
+    Config.withDefault(1_000),
+  ),
+  wslDistroName: Config.string("WSL_DISTRO_NAME").pipe(Config.option),
+});
 
 export class AnalyticsService extends Context.Service<
   AnalyticsService,

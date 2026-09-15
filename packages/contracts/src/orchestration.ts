@@ -642,6 +642,30 @@ export const ThreadTitleRegeneration = Schema.Struct({
 });
 export type ThreadTitleRegeneration = typeof ThreadTitleRegeneration.Type;
 
+export const OrchestrationQueuedTurn = Schema.Struct({
+  id: QueuedTurnId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+  }),
+  modelSelection: Schema.optional(ModelSelection),
+  titleSeed: Schema.optional(TrimmedNonEmptyString),
+  runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  steerRequestedAt: Schema.NullOr(IsoDateTime).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationQueuedTurn = typeof OrchestrationQueuedTurn.Type;
+
 /**
  * Legacy single-PR link. Still emitted as the thread's derived current pull
  * request (see `@t3tools/shared/threadPullRequests`) so clients from before
@@ -2417,7 +2441,7 @@ export const ExternalConversationImportResult = Schema.Struct({
 });
 export type ExternalConversationImportResult = typeof ExternalConversationImportResult.Type;
 
-export class ExternalConversationImportError extends Schema.TaggedErrorClass<ExternalConversationImportError>()(
+export class ExternalConversationImportError extends Schema.TaggedError<ExternalConversationImportError>()(
   "ExternalConversationImportError",
   {
     reason: Schema.Literals([

@@ -63,6 +63,7 @@ function makeReadModel(
         pinnedAt: null,
         deletedAt: null,
         messages: [],
+        queuedTurns: [],
         proposedPlans: [],
         activities: [...activities],
         checkpoints: [],

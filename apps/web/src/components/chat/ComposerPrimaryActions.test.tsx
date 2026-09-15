@@ -46,6 +46,29 @@ function renderPendingActions(isRunning: boolean) {
   );
 }
 
+function renderStandaloneStop() {
+  return renderToStaticMarkup(
+    createElement(ComposerPrimaryActions, {
+      compact: true,
+      pendingAction: null,
+      isRunning: true,
+      showPlanFollowUpPrompt: false,
+      promptHasText: false,
+      isSendBusy: false,
+      sendDisabledReason: null,
+      isConnecting: false,
+      isEnvironmentUnavailable: false,
+      isPreparingWorktree: false,
+      hasSendableContent: false,
+      canQueueWhileRunning: false,
+      onPreviousPendingQuestion: () => {},
+      onCancelPendingAction: () => {},
+      onInterrupt: () => {},
+      onImplementPlanInNewThread: () => {},
+    }),
+  );
+}
+
 function renderRunningActions(hasSendableContent: boolean) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {

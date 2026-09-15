@@ -47,6 +47,7 @@ const thread: OrchestrationThread = {
     createdAt: timestamp,
     updatedAt: timestamp,
   })),
+  queuedTurns: [],
   proposedPlans: [],
   activities: [],
   checkpoints: [],

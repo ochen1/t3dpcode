@@ -9,20 +9,15 @@ import { runMigrations } from "../Migrations.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("053_RepairForkMigrationCollisions", (it) => {
+layer("054_RepairForkMigrationCollisions", (it) => {
   it.effect("applies upstream schema changes skipped by reused fork migration ids", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 42 });
+      yield* runMigrations({ toMigrationInclusive: 47 });
 
       yield* sql`
         INSERT INTO effect_sql_migrations (migration_id, name)
         VALUES
-          (43, 'ForkMigration43'),
-          (44, 'ForkMigration44'),
-          (45, 'ForkMigration45'),
-          (46, 'ForkMigration46'),
-          (47, 'ForkMigration47'),
           (48, 'ForkMigration48'),
           (49, 'ForkMigration49'),
           (50, 'ForkMigration50'),
@@ -30,27 +25,36 @@ layer("053_RepairForkMigrationCollisions", (it) => {
           (52, 'ForkMigration52')
       `;
 
-      yield* runMigrations({ toMigrationInclusive: 53 });
+      yield* runMigrations({ toMigrationInclusive: 54 });
 
-      const projectColumns = yield* sql<{ readonly name: string }>`
-        PRAGMA table_info(projection_projects)
-      `;
       const threadColumns = yield* sql<{ readonly name: string }>`
         PRAGMA table_info(projection_threads)
       `;
+      const messageColumns = yield* sql<{ readonly name: string }>`
+        PRAGMA table_info(projection_thread_messages)
+      `;
+      const pullRequestTables = yield* sql<{ readonly name: string }>`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name = 'projection_thread_pull_requests'
+      `;
 
       assert.equal(
-        projectColumns.some((column) => column.name === "auto_pull"),
+        threadColumns.some((column) => column.name === "branch_pull_request_json"),
         true,
       );
       assert.equal(
-        projectColumns.some((column) => column.name === "project_icon_json"),
+        threadColumns.some((column) => column.name === "active_order_key"),
         true,
       );
       assert.equal(
-        threadColumns.some((column) => column.name === "unsettled_at"),
+        threadColumns.some((column) => column.name === "title_state_json"),
         true,
       );
+      assert.equal(
+        messageColumns.some((column) => column.name === "context_json"),
+        true,
+      );
+      assert.equal(pullRequestTables.length, 1);
     }),
   );
 });

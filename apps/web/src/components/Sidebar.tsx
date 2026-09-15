@@ -4347,17 +4347,10 @@ export default function Sidebar() {
         return;
       }
       if (isMobile) setOpenMobile(false);
-      void startNewThreadFromContext({
-        activeDraftThread: newThreadContext.activeDraftThread,
-        activeThread: newThreadContext.activeThread ?? undefined,
-        defaultProjectRef: newThreadContext.defaultProjectRef,
-        handleNewThread: newThreadContext.handleNewThread,
-      });
-      return;
-    }
-    if (isMobile) setOpenMobile(false);
-    openCommandPalette({ open: "new-thread-in" });
-  }, [isMobile, newThreadContext, projectGroups.length, setOpenMobile]);
+      openCommandPalette({ open: "new-thread-in" });
+    },
+    [isMobile, newThreadContext, projectGroups.length, setOpenMobile],
+  );
   const handleImportConversationClick = useCallback(() => {
     if (isMobile) setOpenMobile(false);
     openCommandPalette({ open: "import-conversation" });

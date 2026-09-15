@@ -61,6 +61,7 @@ import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
 import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
+import { ProjectionQueuedTurn } from "../../persistence/Services/ProjectionQueuedTurns.ts";
 import { ProjectionThreadPullRequest } from "../../persistence/ProjectionThreadPullRequests.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
@@ -119,6 +120,12 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
 );
 const ProjectionTurnStartMessageDbRowSchema = ProjectionThreadMessageDbRowSchema.mapFields(
   Struct.assign({ hasOtherUserMessages: Schema.Number }),
+);
+const ProjectionQueuedTurnDbRowSchema = ProjectionQueuedTurn.mapFields(
+  Struct.assign({
+    attachments: Schema.fromJsonString(Schema.Array(ChatAttachment)),
+    modelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+  }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadPullRequestDbRowSchema = ProjectionThreadPullRequest.mapFields(
@@ -420,6 +427,36 @@ function mapProposedPlanRow(
     implementationThreadId: row.implementationThreadId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+  };
+}
+
+function mapQueuedTurnRow(
+  row: Schema.Schema.Type<typeof ProjectionQueuedTurnDbRowSchema>,
+): OrchestrationQueuedTurn {
+  return {
+    id: row.queuedTurnId,
+    threadId: row.threadId,
+    message: {
+      messageId: row.messageId,
+      role: "user",
+      text: row.text,
+      attachments: row.attachments,
+    },
+    runtimeMode: row.runtimeMode,
+    interactionMode: row.interactionMode,
+    steerRequestedAt: row.steerRequestedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    ...(row.modelSelection !== null ? { modelSelection: row.modelSelection } : {}),
+    ...(row.titleSeed !== null ? { titleSeed: row.titleSeed } : {}),
+    ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
+      ? {
+          sourceProposedPlan: {
+            threadId: row.sourceProposedPlanThreadId,
+            planId: row.sourceProposedPlanId,
+          },
+        }
+      : {}),
   };
 }
 
@@ -2495,6 +2532,7 @@ pending_approval_requests AS (
           ([
             projectRows,
             threadRows,
+            queuedTurnRows,
             proposedPlanRows,
             pullRequestRows,
             sessionRows,

@@ -3096,23 +3096,24 @@ const makeWsRpcLayer = (
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
               const path = yield* Path.Path;
+              const resource = input.resource;
               // An absolute media path can be linked from a thread on another environment.
               if (
-                input.resource._tag === "attachment" ||
-                input.resource._tag === "native-app-icon" ||
-                (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
+                resource._tag === "attachment" ||
+                resource._tag === "native-app-icon" ||
+                (resource._tag === "media-file" && path.isAbsolute(resource.path))
               ) {
-                return yield* issueAssetUrl({ resource: input.resource });
+                return yield* issueAssetUrl({ resource });
               }
-              if (input.resource._tag === "draft-workspace-file") {
+              if (resource._tag === "draft-workspace-file") {
                 // A project draft names its workspace directly; there is no
                 // thread to resolve one from.
                 return yield* issueAssetUrl({
-                  resource: input.resource,
-                  workspaceRoot: input.resource.cwd,
+                  resource,
+                  workspaceRoot: resource.cwd,
                 });
               }
-              if (input.resource._tag === "project-favicon") {
+              if (resource._tag === "project-favicon") {
                 const project = yield* projectionSnapshotQuery
                   .getActiveProjectByWorkspaceRoot(resource.cwd)
                   .pipe(
@@ -3142,14 +3143,14 @@ const makeWsRpcLayer = (
                   Effect.mapError(
                     (cause) =>
                       new AssetWorkspaceContextResolutionError({
-                        resource: input.resource,
+                        resource,
                         cause,
                       }),
                   ),
                 );
               if (Option.isNone(thread)) {
                 return yield* new AssetWorkspaceContextNotFoundError({
-                  resource: input.resource,
+                  resource,
                 });
               }
               const project = yield* projectionSnapshotQuery
@@ -3158,17 +3159,16 @@ const makeWsRpcLayer = (
                   Effect.mapError(
                     (cause) =>
                       new AssetWorkspaceContextResolutionError({
-                        resource: input.resource,
+                        resource,
                         cause,
                       }),
                   ),
                 );
               if (Option.isNone(project)) {
                 return yield* new AssetWorkspaceContextNotFoundError({
-                  resource: input.resource,
+                  resource,
                 });
               }
-              const path = yield* Path.Path;
               let workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
               if (path.isAbsolute(resource.path)) {
                 const relativePath = path.relative(workspaceRoot, resource.path);
@@ -3183,7 +3183,7 @@ const makeWsRpcLayer = (
                       Effect.mapError(
                         (cause) =>
                           new AssetWorkspaceContextResolutionError({
-                            resource: input.resource,
+                            resource,
                             cause,
                           }),
                       ),
@@ -3199,7 +3199,7 @@ const makeWsRpcLayer = (
                 }
               }
               return yield* issueAssetUrl({
-                resource: input.resource,
+                resource,
                 workspaceRoot,
               });
             }),

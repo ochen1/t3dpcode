@@ -94,6 +94,7 @@ const THREAD = {
     settledAt: null,
     deletedAt: null,
     messages: [],
+    queuedTurns: [],
     proposedPlans: [],
     activities: [],
     checkpoints: [],

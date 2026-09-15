@@ -12,6 +12,13 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
 
+const T3_CODE_CHAT_HISTORY_INSTRUCTIONS = `
+
+## T3 Code chat history
+
+Repository instructions, environment context, skills, permissions, and other harness-provided setup are context, not user-sent chat messages. When the user asks about the first, previous, or earlier message in the conversation, answer from the user-authored chat messages and do not identify harness-provided setup as a user message.
+`;
+
 const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `
 
 ## T3 Code devices

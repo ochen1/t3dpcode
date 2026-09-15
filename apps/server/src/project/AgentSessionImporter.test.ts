@@ -160,6 +160,7 @@ const makeProjectedThread = (input: {
             : []),
         ]
       : [],
+    queuedTurns: [],
     proposedPlans: [],
     activities: [],
     checkpoints: [],

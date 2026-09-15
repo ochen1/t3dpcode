@@ -41,6 +41,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -991,6 +992,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             threadId: input.threadId,
           });
 
+          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeGrokAcpRuntime({
             grokSettings,
             ...(options?.environment || mcpSession?.agentDeviceEnvironment

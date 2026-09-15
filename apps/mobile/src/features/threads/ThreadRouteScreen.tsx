@@ -10,6 +10,7 @@ import * as Option from "effect/Option";
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  MessageId,
   ThreadId,
   type ProjectScript,
 } from "@t3tools/contracts";
@@ -554,8 +555,7 @@ function ThreadRouteContent(
 
   const handleCancelUserInput = useCallback(async () => {
     await handleStopThread();
-    await requests.onCancelUserInput();
-  }, [handleStopThread, requests]);
+  }, [handleStopThread]);
 
   const handleOpenTerminal = useCallback(
     (nextTerminalId?: string | null) => {
@@ -925,7 +925,6 @@ function ThreadRouteContent(
           detailDeleted: selectedThreadDetailState.status === "deleted",
           connectionState: routeConnectionState,
         });
-  const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
