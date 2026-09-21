@@ -1,17 +1,20 @@
-interface AgentCompletionTurn {
-  readonly turnId: string;
-  readonly state: string;
-  readonly completedAt: string | null;
-}
+import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./components/Sidebar.logic";
+import type { SidebarThreadSummary } from "./types";
 
-export interface AgentCompletionThreadSnapshot {
-  readonly environmentId: string;
-  readonly id: string;
-  readonly latestTurn: AgentCompletionTurn | null;
-}
+export type AgentCompletionThreadSnapshot = Pick<
+  SidebarThreadSummary,
+  | "environmentId"
+  | "id"
+  | "latestTurn"
+  | "session"
+  | "backgroundLiveness"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+>;
 
 export interface AgentCompletionSnapshotEntry {
-  readonly completionKey: string | null;
+  readonly status: SidebarThreadStatus;
+  readonly completed: boolean;
 }
 
 export type AgentCompletionSnapshot = ReadonlyMap<string, AgentCompletionSnapshotEntry>;
@@ -21,12 +24,10 @@ export function collectAgentCompletionSnapshot(
 ): AgentCompletionSnapshot {
   const snapshot = new Map<string, AgentCompletionSnapshotEntry>();
   for (const thread of threads) {
-    const latestTurn = thread.latestTurn;
-    const completionKey =
-      latestTurn?.state === "completed" && latestTurn.completedAt
-        ? `${latestTurn.turnId}\u0000${latestTurn.completedAt}`
-        : null;
-    snapshot.set(`${thread.environmentId}\u0000${thread.id}`, { completionKey });
+    snapshot.set(`${thread.environmentId}\u0000${thread.id}`, {
+      status: resolveSidebarThreadStatus(thread),
+      completed: thread.latestTurn?.state === "completed" && thread.latestTurn.completedAt !== null,
+    });
   }
   return snapshot;
 }
@@ -36,14 +37,13 @@ export function hasNewAgentCompletion(
   next: AgentCompletionSnapshot,
 ): boolean {
   for (const [threadKey, entry] of next) {
-    if (entry.completionKey === null) {
-      continue;
-    }
-    const previousEntry = previous.get(threadKey);
-    if (previousEntry === undefined) {
-      continue;
-    }
-    if (previousEntry.completionKey !== entry.completionKey) {
+    // A turn can complete while the session or its background agents still work.
+    // Only the same status transition shown by the sidebar should make a sound.
+    if (
+      previous.get(threadKey)?.status === "working" &&
+      entry.status === "ready" &&
+      entry.completed
+    ) {
       return true;
     }
   }

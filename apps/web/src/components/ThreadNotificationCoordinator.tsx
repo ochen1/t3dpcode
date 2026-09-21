@@ -2,6 +2,12 @@ import { useAtomValue } from "@effect/atom-react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import {
+  CircleAlertIcon,
+  CircleCheckIcon,
+  MessageCircleQuestionIcon,
+  ShieldQuestionIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
@@ -14,7 +20,7 @@ import {
   setNotificationBadge,
   unlockNotificationAudio,
 } from "../threadNotifications";
-import { resolveSidebarThreadStatus } from "./Sidebar.logic";
+import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./Sidebar.logic";
 import { toastManager } from "./ui/toast";
 
 export function ThreadNotificationCoordinator() {
@@ -98,7 +104,7 @@ function EnvironmentNotifications({
     strict: false,
   });
   const previous = useRef(
-    new Map<ThreadId, { attention: string | null; completion: number | null }>(),
+    new Map<ThreadId, { status: SidebarThreadStatus; attention: string | null }>(),
   );
 
   useEffect(() => {
@@ -106,7 +112,7 @@ function EnvironmentNotifications({
       previous.current.clear();
       return;
     }
-    const next = new Map<ThreadId, { attention: string | null; completion: number | null }>();
+    const next = new Map<ThreadId, { status: SidebarThreadStatus; attention: string | null }>();
     for (const thread of shell.snapshot.value.threads) {
       let status = resolveSidebarThreadStatus(thread);
       if (status === "ready" && thread.latestTurn?.state === "error") status = "failed";
@@ -116,18 +122,15 @@ function EnvironmentNotifications({
           ? `${thread.latestTurn?.turnId ?? ""}:${status}`
           : null;
       const completedAt = Date.parse(thread.latestTurn?.completedAt ?? "");
-      const completion =
-        status === "ready" &&
-        thread.latestTurn?.state === "completed" &&
-        Number.isFinite(completedAt)
-          ? completedAt
-          : (prior?.completion ?? null);
-      next.set(thread.id, { attention, completion });
+      next.set(thread.id, { status, attention });
       if (!prior || thread.archivedAt !== null) continue;
       const kind =
         attention && attention !== prior.attention
           ? "input"
-          : completion !== null && (prior.completion === null || completion > prior.completion)
+          : prior.status === "working" &&
+              status === "ready" &&
+              thread.latestTurn?.state === "completed" &&
+              Number.isFinite(completedAt)
             ? "completion"
             : null;
       if (!kind) continue;
@@ -140,8 +143,11 @@ function EnvironmentNotifications({
               ? "Thread failed"
               : "Input needed";
       if (hasNotificationSound(mode)) {
-        void playNotificationSound(kind, () =>
-          hasNotificationSound(getClientSettings().notificationMode),
+        void playNotificationSound(
+          kind,
+          () =>
+            hasNotificationSound(getClientSettings().notificationMode) &&
+            (kind !== "completion" || previous.current.get(thread.id)?.status === "ready"),
         );
       }
       if (
@@ -154,7 +160,28 @@ function EnvironmentNotifications({
           type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
           title,
           description: thread.title,
-          data: { hideCopyButton: true },
+          data: {
+            hideCopyButton: true,
+            leadingIcon:
+              kind === "completion" ? (
+                <CircleCheckIcon
+                  aria-hidden
+                  className="size-4 text-emerald-700 dark:text-emerald-300"
+                />
+              ) : status === "approval" ? (
+                <ShieldQuestionIcon
+                  aria-hidden
+                  className="size-4 text-amber-700 dark:text-amber-300"
+                />
+              ) : status === "failed" ? (
+                <CircleAlertIcon aria-hidden className="size-4 text-red-700 dark:text-red-300" />
+              ) : (
+                <MessageCircleQuestionIcon
+                  aria-hidden
+                  className="size-4 text-indigo-600 dark:text-indigo-300"
+                />
+              ),
+          },
           actionProps: {
             children: "Open thread",
             onClick: () => {

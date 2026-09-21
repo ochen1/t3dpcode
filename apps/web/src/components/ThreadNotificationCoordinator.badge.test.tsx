@@ -63,7 +63,7 @@ const thread = {
   archivedAt: null as string | null,
   hasPendingApprovals: false,
   hasPendingUserInput: false,
-  session: null,
+  session: { status: "running" },
   latestTurn: { turnId: "turn", state: "running", completedAt: null as string | null },
 };
 let renderer: ReactTestRenderer | undefined;
@@ -76,7 +76,10 @@ function shell(overrides: Partial<typeof thread> = {}) {
 function complete(environment = "one", completedAt = "2026-09-13T08:00:00Z") {
   state.shells.set(
     environment,
-    shell({ latestTurn: { turnId: "turn", state: "completed", completedAt } }),
+    shell({
+      session: { status: "ready" },
+      latestTurn: { turnId: "turn", state: "completed", completedAt },
+    }),
   );
 }
 async function render() {
@@ -122,6 +125,8 @@ it("counts notifying threads across environments, replaces repeat alerts, and cl
   complete();
   await render();
   expect(state.badge).toHaveBeenLastCalledWith(1);
+  state.shells.set("one", shell());
+  await render();
   complete("one", "2026-09-13T08:01:00Z");
   complete("two");
   await render();
@@ -134,6 +139,8 @@ it("counts notifying threads across environments, replaces repeat alerts, and cl
     TestNotification.sent.every((notification) => notification.close.mock.calls.length > 0),
   ).toBe(true);
   focused = false;
+  state.shells.set("two", shell());
+  await render();
   complete("two", "2026-09-13T08:02:00Z");
   await render();
   expect(state.badge).toHaveBeenLastCalledWith(1);
@@ -251,7 +258,10 @@ it("shows in-app alerts without adding a badge while focused", async () => {
 it("badges background failures with in-app notifications enabled", async () => {
   state.inApp = true;
   await render();
-  state.shells.set("one", shell({ latestTurn: { ...thread.latestTurn, state: "error" } }));
+  state.shells.set(
+    "one",
+    shell({ session: { status: "ready" }, latestTurn: { ...thread.latestTurn, state: "error" } }),
+  );
   await render();
   expect(TestNotification.sent[0]?.title).toBe("Thread failed");
   expect(state.badge).toHaveBeenLastCalledWith(1);

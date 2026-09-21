@@ -16,6 +16,8 @@ const state = vi.hoisted(() => ({
   input: false,
   approval: false,
   sessionError: false,
+  working: true,
+  backgroundLiveness: undefined as "working" | "monitoring" | undefined,
   turnError: false,
   add: vi.fn(
     (_toast: { title: string; description: string; actionProps: { onClick: () => void } }) =>
@@ -40,7 +42,12 @@ vi.mock("@effect/atom-react", () => ({
           archivedAt: state.archivedAt,
           hasPendingUserInput: state.input,
           hasPendingApprovals: state.approval,
-          session: state.sessionError ? { status: "error" } : null,
+          session: state.sessionError
+            ? { status: "error" }
+            : state.working
+              ? { status: "running" }
+              : null,
+          backgroundLiveness: state.backgroundLiveness,
           latestTurn: {
             turnId: "turn-1",
             state: state.turnError ? "error" : state.completedAt ? "completed" : "running",
@@ -90,6 +97,7 @@ async function render() {
 }
 
 async function complete() {
+  state.working = false;
   state.completedAt = "2026-09-13T10:00:00.000Z";
   await render();
 }
@@ -108,6 +116,8 @@ beforeEach(() => {
     input: false,
     approval: false,
     sessionError: false,
+    working: true,
+    backgroundLiveness: undefined as "working" | "monitoring" | undefined,
     turnError: false,
   });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -130,6 +140,46 @@ afterEach(async () => {
 });
 
 describe("thread notifications", () => {
+  it("waits for session and background work to end before sounding once", async () => {
+    state.mode = "sound";
+    await render();
+    state.completedAt = "2026-09-13T10:00:00.000Z";
+    await render();
+    expect(state.sound).not.toHaveBeenCalled();
+    state.working = false;
+    state.backgroundLiveness = "working";
+    await render();
+    expect(state.sound).not.toHaveBeenCalled();
+    state.backgroundLiveness = undefined;
+    await render();
+    expect(state.sound).toHaveBeenCalledTimes(1);
+    expect(state.sound).toHaveBeenCalledWith("completion", expect.any(Function));
+    state.completedAt = "2026-09-13T10:05:00.000Z";
+    await render();
+    expect(state.sound).toHaveBeenCalledTimes(1);
+    expect(state.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels delayed completion audio if the thread resumes working", async () => {
+    state.mode = "sound";
+    await render();
+    await complete();
+    const shouldPlay = state.sound.mock.calls[0]?.[1] as () => boolean;
+    expect(shouldPlay()).toBe(true);
+    state.working = true;
+    await render();
+    expect(shouldPlay()).toBe(false);
+  });
+
+  it("does not announce a completed turn unless the thread was working", async () => {
+    state.mode = "sound";
+    state.working = false;
+    await render();
+    await complete();
+    expect(state.sound).not.toHaveBeenCalled();
+    expect(state.add).not.toHaveBeenCalled();
+  });
+
   it("alerts once with system alerts off and opens the completed thread", async () => {
     await render();
     await complete();
@@ -170,6 +220,7 @@ describe("thread notifications", () => {
     state.mode = "notifications-and-sound";
     await render();
     state[event] = true;
+    state.working = false;
     await render();
     await render();
     expect(state.add).toHaveBeenCalledTimes(1);
@@ -181,6 +232,7 @@ describe("thread notifications", () => {
     await render();
     state.focused = false;
     state[event] = true;
+    state.working = false;
     await render();
     await render();
     expect(state.add).toHaveBeenCalledTimes(1);

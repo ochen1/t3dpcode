@@ -1,6 +1,3 @@
-import * as Layer from "effect/Layer";
-import * as Tracer from "effect/Tracer";
-
 export interface ClientTracingConfig {
   readonly exportIntervalMs?: number;
 }

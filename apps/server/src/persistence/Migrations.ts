@@ -70,6 +70,7 @@ import Migration0056 from "./Migrations/056_ProjectionQueuedTurns.ts";
 import Migration0057 from "./Migrations/057_BackfillClaudeProviderThreadIds.ts";
 import Migration0058 from "./Migrations/058_BackfillCodexProviderThreadIds.ts";
 import Migration0059 from "./Migrations/059_SelfHostedPushDevices.ts";
+import Migration0053 from "./Migrations/053_PullRequestFilesViewed.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -134,12 +135,15 @@ const migrationEntries = [
   [50, "ProjectionThreadPullRequests", Migration0050],
   [51, "ProjectionThreadMessageContext", Migration0051],
   [52, "ProjectionThreadTitleState", Migration0052],
+  [53, "PullRequestFilesViewed", Migration0053],
   [54, "RepairForkMigrationCollisions", Migration0054],
   [55, "BackfillProjectionThreadLatestTurn", Migration0055],
   [56, "ProjectionQueuedTurns", Migration0056],
   [57, "BackfillClaudeProviderThreadIds", Migration0057],
   [58, "BackfillCodexProviderThreadIds", Migration0058],
   [59, "SelfHostedPushDevices", Migration0059],
+  // Existing forks already passed 53; replay the idempotent upstream migration.
+  [60, "EnsurePullRequestFilesViewed", Migration0053],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
