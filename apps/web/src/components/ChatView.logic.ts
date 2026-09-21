@@ -1402,3 +1402,23 @@ export function restorePlanFollowUpComposer(input: {
     detectTrigger: true,
   });
 }
+
+/** Follow-ups on server threads must be persisted before clearing the composer. */
+export function resolveFollowUpQueueTarget(input: {
+  isRunning: boolean;
+  isServerThread: boolean;
+  isLocalDraftThread: boolean;
+  isQueuedReplay: boolean;
+  isDirectAnnotation: boolean;
+  followUpBehavior: "queue" | "steer";
+  submissionIntent: ComposerSubmissionIntent;
+}): "server" | "client" | null {
+  if (
+    !input.isRunning ||
+    input.isQueuedReplay ||
+    input.isDirectAnnotation ||
+    (input.followUpBehavior === "queue") === (input.submissionIntent === "alternate")
+  )
+    return null;
+  return input.isServerThread && !input.isLocalDraftThread ? "server" : "client";
+}

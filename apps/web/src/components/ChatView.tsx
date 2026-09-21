@@ -457,6 +457,7 @@ import {
   rememberCheckoutIsRepo,
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
+  resolveFollowUpQueueTarget,
   resolveComposerProviderSelection,
   getAntigravitySendBlockReason,
   resolveDraftHeroState,
@@ -7653,13 +7654,16 @@ export default function ChatView(props: ChatViewProps) {
       );
       return;
     }
-    if (
-      !queuedMessage &&
-      !directAnnotation &&
-      phase === "running" &&
-      activeThreadKey &&
-      (settings.followUpBehavior === "queue") !== (submissionIntent === "alternate")
-    ) {
+    const followUpQueueTarget = resolveFollowUpQueueTarget({
+      isRunning: phase === "running",
+      isServerThread,
+      isLocalDraftThread,
+      isQueuedReplay: queuedMessage !== undefined && queuedMessage !== null,
+      isDirectAnnotation: Boolean(directAnnotation),
+      followUpBehavior: settings.followUpBehavior,
+      submissionIntent,
+    });
+    if (followUpQueueTarget === "client" && activeThreadKey) {
       if (composerRef.current?.validateProviderInput(promptForSend) === false) {
         return;
       }
@@ -7975,8 +7979,7 @@ export default function ChatView(props: ChatViewProps) {
       ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
       ctxSelectedModelSelection.options,
     );
-    const shouldQueueTurn = phase === "running" && isServerThread && !isLocalDraftThread;
-    if (shouldQueueTurn) {
+    if (followUpQueueTarget === "server") {
       sendInFlightRef.current = true;
       try {
         setThreadError(threadIdForSend, null);
@@ -8009,13 +8012,18 @@ export default function ChatView(props: ChatViewProps) {
               message: {
                 messageId: messageIdForSend,
                 role: "user",
-                text: outgoingMessageText,
+                text: outgoingMessageContext
+                  ? serializeLegacyContextMessage({
+                      text: outgoingMessageText,
+                      records: outgoingMessageContext.records,
+                    })
+                  : outgoingMessageText,
                 attachments: turnAttachmentsResult.value,
               },
               modelSelection: ctxSelectedModelSelection,
               titleSeed: title,
               runtimeMode,
-              interactionMode,
+              interactionMode: sendInteractionMode,
               createdAt: messageCreatedAt,
             },
           });

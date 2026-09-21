@@ -55,6 +55,7 @@ import {
   rememberCheckoutIsRepo,
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
+  resolveFollowUpQueueTarget,
   restorePlanFollowUpComposer,
   resolveComposerProviderSelection,
   resolveDraftPromotionNavigationTarget,
@@ -2558,5 +2559,48 @@ describe("worktree setup visibility", () => {
       ...settledDone,
       sequence: 9,
     });
+  });
+});
+
+describe("follow-up queue ownership", () => {
+  const runningThread = {
+    isRunning: true,
+    isServerThread: true,
+    isLocalDraftThread: false,
+    isQueuedReplay: false,
+    isDirectAnnotation: false,
+    followUpBehavior: "queue" as const,
+    submissionIntent: "foreground" as const,
+  };
+
+  it.each([
+    ["queue", "foreground", "server"],
+    ["queue", "alternate", null],
+    ["steer", "foreground", null],
+    ["steer", "alternate", "server"],
+  ] as const)(
+    "routes %s with %s submission to %s",
+    (followUpBehavior, submissionIntent, target) => {
+      expect(
+        resolveFollowUpQueueTarget({ ...runningThread, followUpBehavior, submissionIntent }),
+      ).toBe(target);
+    },
+  );
+
+  it("keeps a running server thread's queue off the client", () => {
+    expect(resolveFollowUpQueueTarget(runningThread)).toBe("server");
+    expect(
+      resolveFollowUpQueueTarget({
+        ...runningThread,
+        isServerThread: false,
+        isLocalDraftThread: true,
+      }),
+    ).toBe("client");
+  });
+
+  it("sends idle messages, explicit replays, and direct annotations without requeueing", () => {
+    expect(resolveFollowUpQueueTarget({ ...runningThread, isRunning: false })).toBeNull();
+    expect(resolveFollowUpQueueTarget({ ...runningThread, isQueuedReplay: true })).toBeNull();
+    expect(resolveFollowUpQueueTarget({ ...runningThread, isDirectAnnotation: true })).toBeNull();
   });
 });
