@@ -51,6 +51,34 @@ const layer = it.layer(
 );
 
 layer("OrchestrationEventStore", (it) => {
+  it.effect("filters cleanup replay before decoding unrelated legacy events", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("legacy-cleanup-thread");
+      const legacy = yield* eventStore.append(messageEvent(threadId, "legacy-queue-event"));
+      yield* sql`UPDATE orchestration_events SET event_type = 'thread.turn-queued', payload_json = '{}'
+        WHERE sequence = ${legacy.sequence}`;
+      const deleted = yield* eventStore.append({
+        ...messageEvent(threadId, "cleanup-delete-event"),
+        type: "thread.deleted",
+        payload: { threadId, deletedAt: "2026-01-01T00:00:00.000Z" },
+      });
+      const events = yield* Stream.runCollect(
+        eventStore.readFromSequence(legacy.sequence - 1, 10, ["thread.deleted", "thread.reverted"]),
+      );
+      assert.deepEqual(events, [deleted]);
+      assert.deepEqual(
+        yield* Stream.runCollect(
+          eventStore.readFromSequence(deleted.sequence, 10, ["thread.deleted"]),
+        ),
+        [],
+      );
+      assert.deepEqual(yield* Stream.runCollect(eventStore.readFromSequence(0, 10, [])), []);
+      yield* sql`DELETE FROM orchestration_events WHERE sequence IN (${legacy.sequence}, ${deleted.sequence})`;
+    }),
+  );
+
   it.effect("stores json columns as strings and replays CLI-origin events", () =>
     Effect.gen(function* () {
       const eventStore = yield* OrchestrationEventStore;

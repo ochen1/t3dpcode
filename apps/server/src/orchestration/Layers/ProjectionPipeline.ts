@@ -2286,12 +2286,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
       // Cleanup has its own cursor so retries never have to replay committed text.
       // All message and activity references are current before any files are removed.
       const pendingCleanup = new Map<string, OrchestrationEvent>();
-      let lastEvent: OrchestrationEvent | undefined;
+      const [cleanupHead] = yield* sql<{ readonly sequence: number; readonly occurredAt: string }>`
+        SELECT sequence, occurred_at AS "occurredAt" FROM orchestration_events
+        ORDER BY sequence DESC LIMIT 1
+      `;
+      let cleanupThrough = cleanupHead;
       yield* Stream.runForEach(
-        eventStore.readFromSequence(cleanupStart, Number.MAX_SAFE_INTEGER),
+        // Legacy provider events are irrelevant to file cleanup and may no longer decode.
+        eventStore.readFromSequence(cleanupStart, Number.MAX_SAFE_INTEGER, [
+          "thread.reverted",
+          "thread.deleted",
+        ]),
         (event) =>
           Effect.sync(() => {
-            lastEvent = event;
+            if (!cleanupThrough || event.sequence > cleanupThrough.sequence) cleanupThrough = event;
             if (event.type === "thread.reverted" || event.type === "thread.deleted") {
               pendingCleanup.set(`${event.type}:${event.payload.threadId}`, event);
             }
@@ -2309,11 +2317,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         // Leave the cleanup cursor behind this event so the next bootstrap retries it.
         if (!cleaned) return;
       }
-      if (lastEvent) {
+      if (cleanupThrough) {
         yield* projectionStateRepository.upsert({
           projector: cleanupProjector,
-          lastAppliedSequence: lastEvent.sequence,
-          updatedAt: lastEvent.occurredAt,
+          lastAppliedSequence: cleanupThrough.sequence,
+          updatedAt: cleanupThrough.occurredAt,
         });
       }
     }).pipe(
