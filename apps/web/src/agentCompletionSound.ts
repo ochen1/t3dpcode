@@ -1,16 +1,8 @@
 import { resolveSidebarThreadStatus, type SidebarThreadStatus } from "./components/Sidebar.logic";
 import type { SidebarThreadSummary } from "./types";
 
-export type AgentCompletionThreadSnapshot = Pick<
-  SidebarThreadSummary,
-  | "environmentId"
-  | "id"
-  | "latestTurn"
-  | "session"
-  | "backgroundLiveness"
-  | "hasPendingApprovals"
-  | "hasPendingUserInput"
->;
+export type AgentCompletionThreadSnapshot = Parameters<typeof resolveSidebarThreadStatus>[0] &
+  Pick<SidebarThreadSummary, "environmentId" | "id" | "latestRun">;
 
 export interface AgentCompletionSnapshotEntry {
   readonly status: SidebarThreadStatus;
@@ -26,7 +18,7 @@ export function collectAgentCompletionSnapshot(
   for (const thread of threads) {
     snapshot.set(`${thread.environmentId}\u0000${thread.id}`, {
       status: resolveSidebarThreadStatus(thread),
-      completed: thread.latestTurn?.state === "completed" && thread.latestTurn.completedAt !== null,
+      completed: thread.latestRun?.status === "completed" && thread.latestRun.completedAt !== null,
     });
   }
   return snapshot;

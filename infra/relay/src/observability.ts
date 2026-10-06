@@ -1,29 +1,17 @@
-import * as Alchemy from "alchemy";
+import * as Redacted from "effect/Redacted";
+import * as Output from "alchemy/Output";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 
-export const RelayObservability = Effect.gen(function* () {
-  yield* Alchemy.Stack;
-  const traces = {
-    name: "",
-    otelTracesEndpoint: "",
-  };
-  const workerIngestToken = {
-    token: Redacted.make(""),
-  };
-  const mobileIngestToken = {
-    token: Redacted.make(""),
-  };
-  const clientIngestToken = {
-    token: Redacted.make(""),
-  };
-  return { traces, workerIngestToken, mobileIngestToken, clientIngestToken } as const;
+export const RelayObservability = Effect.succeed({
+  traces: { name: Output.asOutput(""), otelTracesEndpoint: Output.asOutput("") },
+  workerIngestToken: { token: Output.asOutput(Redacted.make("")) },
+  mobileIngestToken: { token: Output.asOutput(Redacted.make("")) },
+  clientIngestToken: { token: Output.asOutput(Redacted.make("")) },
 });
 
 export const withSpanAttributes =
@@ -170,18 +158,14 @@ const withSchemaErrorAttributes = (delegate: Tracer.Tracer): Tracer.Tracer =>
     ...(delegate.context ? { context: delegate.context } : {}),
   });
 
-export const makeRelayTraceLayer = (input: {
-  readonly tracesEndpoint: string;
-  readonly tracesDatasetName: string;
-  readonly ingestToken: Redacted.Redacted<string>;
-}) => {
-  void input;
-  return Layer.succeed(
-    Tracer.Tracer,
-    withSchemaErrorAttributes(
-      Tracer.make({
-        span: (options) => new Tracer.NativeSpan(options),
-      }),
-    ),
+/**
+ * Adds a failed span's schema error fields (`error.type`, `error.<field>`) to
+ * the span, on whichever tracer is current. Provide it around the work whose
+ * spans should carry them; the Worker's telemetry still owns export.
+ */
+export const withSchemaErrorSpanAttributes = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.flatMap(Effect.tracer, (tracer) =>
+    effect.pipe(Effect.withTracer(withSchemaErrorAttributes(tracer))),
   );
-};

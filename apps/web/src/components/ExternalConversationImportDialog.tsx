@@ -20,7 +20,7 @@ import { formatRelativeTimeLabel } from "../timestampFormat";
 import { cn } from "../lib/utils";
 import { ClaudeAI, OpenAI } from "./Icons";
 import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { ScrollArea } from "./ui/scroll-area";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
@@ -199,7 +199,7 @@ export function ExternalConversationImportDialog({
           <ArrowLeftIcon />
         </Button>
         <div className="min-w-0 flex-1">
-          <h2 className="font-heading font-semibold text-base">Import conversation</h2>
+          <h2 className="font-semibold text-base">Import conversation</h2>
           <p className="text-muted-foreground text-xs">
             Bring in Claude Code or Codex messages and complete tool history.
           </p>
@@ -227,15 +227,16 @@ export function ExternalConversationImportDialog({
             ))}
           </SelectPopup>
         </Select>
-        <label className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
+        <InputGroup>
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput
             placeholder="Search conversations"
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
-        </label>
+        </InputGroup>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -296,20 +297,20 @@ export function ExternalConversationImportDialog({
                       <span className="min-w-0 flex-1 truncate font-medium text-sm">
                         {conversation.title}
                       </span>
-                      <span className="shrink-0 text-muted-foreground text-[11px]">
+                      <span className="shrink-0 text-muted-foreground text-2xs">
                         {formatRelativeTimeLabel(conversation.updatedAt)}
                       </span>
                     </span>
                     <span className="mt-0.5 block truncate text-muted-foreground text-xs">
                       {conversation.preview || conversation.cwd || conversation.providerLabel}
                     </span>
-                    <span className="mt-1 flex items-center gap-2 text-muted-foreground/75 text-[11px]">
+                    <span className="mt-1 flex items-center gap-2 text-muted-foreground/75 text-2xs">
                       <span>{conversation.providerLabel}</span>
                       {conversation.cwd ? (
                         <span className="truncate">{conversation.cwd}</span>
                       ) : null}
                       {conversation.importedThreadId ? (
-                        <span className="ms-auto inline-flex shrink-0 items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <span className="ms-auto inline-flex shrink-0 items-center gap-1 text-success">
                           <CheckIcon className="size-3" /> Imported
                         </span>
                       ) : null}

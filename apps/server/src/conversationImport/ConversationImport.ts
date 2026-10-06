@@ -3,7 +3,6 @@ import * as NodeOS from "node:os";
 import {
   ClaudeSettings,
   CodexSettings,
-  CommandId,
   DEFAULT_MODEL_BY_PROVIDER,
   ExternalConversationImportError,
   type ExternalConversationImportInput,
@@ -18,7 +17,6 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -27,14 +25,18 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { expandHomePath } from "../pathExpansion.ts";
-import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import { ProviderSessionDirectory } from "../provider/Services/ProviderSessionDirectory.ts";
+import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
+import { ProviderSessionRuntimeRepository } from "../persistence/ProviderSessionRuntime.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { EventSinkV2 } from "../orchestration-v2/EventSink.ts";
+import { deriveProviderThread } from "../orchestration-v2/IdAllocator.ts";
+import { ProjectService } from "../project/ProjectService.ts";
+import { externalConversationEvents } from "./externalConversationEvents.ts";
+
 import {
   type ParsedExternalConversation,
   parseClaudeTranscript,
@@ -174,12 +176,12 @@ function sourceKey(source: NativeConversationSource, externalThreadId: string): 
 const makeConversationImport = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
   const settingsService = yield* ServerSettingsService;
   const instanceRegistry = yield* ProviderInstanceRegistry;
-  const sessionDirectory = yield* ProviderSessionDirectory;
-  const orchestration = yield* OrchestrationEngineService;
-  const projections = yield* ProjectionSnapshotQuery;
+  const sessionDirectory = yield* ProviderSessionRuntimeRepository;
+  const eventSink = yield* EventSinkV2;
+  const sql = yield* SqlClient.SqlClient;
+  const projects = yield* ProjectService;
 
   const fail = (
     reason: ExternalConversationImportError["reason"],
@@ -304,21 +306,18 @@ const makeConversationImport = Effect.gen(function* () {
         ...(cwd === undefined ? {} : { cwd }),
       });
     }
-    return Array.from(
-      indexed,
-      ([externalThreadId, entry]): IndexedConversation => ({
-        externalThreadId,
-        title: titleFromPrompt(
-          entry.firstPrompt,
-          source.provider === "claudeAgent" ? "Claude conversation" : "Codex conversation",
-        ),
-        preview: previewFromPrompt(entry.lastPrompt),
-        ...(entry.cwd ? { cwd: entry.cwd } : {}),
-        createdAt: entry.createdAt,
-        updatedAt: entry.updatedAt,
-        transcriptPath: files.get(externalThreadId) as string,
-      }),
-    );
+    return Array.from(indexed, ([externalThreadId, entry]): IndexedConversation => ({
+      externalThreadId,
+      title: titleFromPrompt(
+        entry.firstPrompt,
+        source.provider === "claudeAgent" ? "Claude conversation" : "Codex conversation",
+      ),
+      preview: previewFromPrompt(entry.lastPrompt),
+      ...(entry.cwd ? { cwd: entry.cwd } : {}),
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      transcriptPath: files.get(externalThreadId) as string,
+    }));
   });
 
   const list: ConversationImportShape["list"] = Effect.fn("ConversationImport.list")(
@@ -328,7 +327,7 @@ const makeConversationImport = Effect.gen(function* () {
         [
           Effect.forEach(sources, (source) => indexSource(source), { concurrency: 4 }),
           sessionDirectory
-            .listBindings()
+            .list()
             .pipe(
               Effect.mapError((cause) =>
                 fail("import-failed", "Could not inspect imported conversations.", cause),
@@ -343,22 +342,20 @@ const makeConversationImport = Effect.gen(function* () {
         if (marker) imported.set(markerKey(marker), binding.threadId);
       }
       const conversations = sources.flatMap((source, sourceIndex) =>
-        sourceIndexes[sourceIndex]!.map(
-          (candidate): ExternalConversationSummary => ({
-            externalThreadId: candidate.externalThreadId,
-            provider: source.provider,
-            providerInstanceId: source.providerInstanceId,
-            providerLabel: source.providerLabel,
-            title: candidate.title,
-            preview: candidate.preview,
-            ...(candidate.cwd ? { cwd: candidate.cwd } : {}),
-            createdAt: candidate.createdAt,
-            updatedAt: candidate.updatedAt,
-            ...(imported.get(sourceKey(source, candidate.externalThreadId)) === undefined
-              ? {}
-              : { importedThreadId: imported.get(sourceKey(source, candidate.externalThreadId)) }),
-          }),
-        ),
+        sourceIndexes[sourceIndex]!.map((candidate): ExternalConversationSummary => ({
+          externalThreadId: candidate.externalThreadId,
+          provider: source.provider,
+          providerInstanceId: source.providerInstanceId,
+          providerLabel: source.providerLabel,
+          title: candidate.title,
+          preview: candidate.preview,
+          ...(candidate.cwd ? { cwd: candidate.cwd } : {}),
+          createdAt: candidate.createdAt,
+          updatedAt: candidate.updatedAt,
+          ...(imported.get(sourceKey(source, candidate.externalThreadId)) === undefined
+            ? {}
+            : { importedThreadId: imported.get(sourceKey(source, candidate.externalThreadId)) }),
+        })),
       );
       conversations.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
       return { conversations: conversations.slice(0, input.limit ?? DEFAULT_LIST_LIMIT) };
@@ -377,7 +374,7 @@ const makeConversationImport = Effect.gen(function* () {
       );
     }
     const existingBindings = yield* sessionDirectory
-      .listBindings()
+      .list()
       .pipe(
         Effect.mapError((cause) =>
           fail("import-failed", "Could not inspect imported conversations.", cause),
@@ -391,8 +388,8 @@ const makeConversationImport = Effect.gen(function* () {
     });
     if (existing) return { threadId: existing.threadId, alreadyImported: true };
 
-    const project = yield* projections
-      .getProjectShellById(input.projectId)
+    const project = yield* projects
+      .getById(input.projectId)
       .pipe(
         Effect.mapError((cause) =>
           fail("import-failed", "Could not inspect the target project.", cause),
@@ -452,74 +449,64 @@ const makeConversationImport = Effect.gen(function* () {
       );
     }
     const modelSelection: ModelSelection = { instanceId: source.providerInstanceId, model };
-    const [rawThreadId, rawCommandId, importedAt] = yield* Effect.all(
-      [crypto.randomUUIDv4, crypto.randomUUIDv4, DateTime.now.pipe(Effect.map(DateTime.formatIso))],
-      { concurrency: 3 },
-    ).pipe(
-      Effect.mapError((cause) =>
-        fail("import-failed", "Could not allocate the imported conversation.", cause),
-      ),
+    // Deterministic identity makes imports idempotent across clients and retries.
+    const threadId = ThreadId.make(
+      `import:${source.providerInstanceId}:${parsed.externalThreadId}`,
     );
-    const threadId = ThreadId.make(rawThreadId);
-    const commandId = CommandId.make(rawCommandId);
-    yield* orchestration
-      .dispatch({
-        type: "thread.import",
-        commandId,
-        threadId,
-        projectId: input.projectId,
-        title: parsed.title,
-        modelSelection,
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        messages: parsed.messages,
-        activities: parsed.activities,
-        session: {
-          threadId,
-          status: "ready",
-          providerName: source.provider,
-          providerInstanceId: source.providerInstanceId,
-          providerThreadId: parsed.externalThreadId,
-          runtimeMode: "full-access",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: importedAt,
-        },
-        sourceCreatedAt: parsed.createdAt,
-        sourceUpdatedAt: parsed.updatedAt,
-        importedAt,
-      })
+    const providerThreadId = deriveProviderThread({
+      driver: ProviderDriverKind.make(source.provider),
+      nativeThreadId: parsed.externalThreadId,
+      providerInstanceId: source.providerInstanceId,
+    });
+    yield* sql
+      .withTransaction(
+        Effect.gen(function* () {
+          yield* eventSink
+            .write({
+              events: externalConversationEvents({
+                threadId,
+                providerThreadId,
+                projectId: input.projectId,
+                provider: source.provider,
+                modelSelection,
+                parsed,
+              }),
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                fail("import-failed", "Could not persist the conversation.", cause),
+              ),
+            );
+          yield* sessionDirectory
+            .upsert({
+              threadId,
+              providerName: source.provider,
+              providerInstanceId: source.providerInstanceId,
+              adapterKey: source.provider,
+              status: "stopped",
+              runtimeMode: "full-access",
+              lastSeenAt: parsed.updatedAt,
+              resumeCursor: parsed.resumeCursor,
+              runtimePayload: {
+                cwd: project.value.workspaceRoot,
+                modelSelection,
+                externalConversation: {
+                  provider: source.provider,
+                  providerInstanceId: source.providerInstanceId,
+                  externalThreadId: parsed.externalThreadId,
+                },
+              },
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                fail("import-failed", "Could not save continuation state.", cause),
+              ),
+            );
+        }),
+      )
       .pipe(
         Effect.mapError((cause) =>
-          fail("import-failed", "Could not persist the conversation.", cause),
-        ),
-      );
-    yield* sessionDirectory
-      .upsert({
-        threadId,
-        provider: ProviderDriverKind.make(source.provider),
-        providerInstanceId: source.providerInstanceId,
-        adapterKey: source.provider,
-        status: "stopped",
-        runtimeMode: "full-access",
-        resumeCursor: parsed.resumeCursor,
-        runtimePayload: {
-          cwd: project.value.workspaceRoot,
-          modelSelection,
-          externalConversation: {
-            provider: source.provider,
-            providerInstanceId: source.providerInstanceId,
-            externalThreadId: parsed.externalThreadId,
-          },
-        },
-      })
-      .pipe(
-        Effect.mapError((cause) =>
-          fail(
-            "import-failed",
-            "The conversation imported, but its continuation state could not be saved.",
-            cause,
-          ),
+          fail("import-failed", "Could not commit the imported conversation.", cause),
         ),
       );
     return { threadId, alreadyImported: false };

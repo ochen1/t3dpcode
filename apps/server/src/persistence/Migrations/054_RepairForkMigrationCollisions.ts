@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import ProjectionThreadBranchPullRequest from "./048_ProjectionThreadBranchPullRequest.ts";
 import ProjectionThreadsActiveOrderKey from "./049_ProjectionThreadsActiveOrderKey.ts";

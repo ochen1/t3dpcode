@@ -1,7 +1,8 @@
+import ForkMigration from "./058_BackfillCodexProviderThreadIds.ts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -33,7 +34,7 @@ layer("058_BackfillCodexProviderThreadIds", (it) => {
           ('thread-unsafe', 'codex', 'codex', 'full-access', 'ready', '2026-08-06T00:00:00.000Z', '{"threadId":"unsafe;command"}', NULL)
       `;
 
-      yield* runMigrations({ toMigrationInclusive: 58 });
+      yield* ForkMigration;
       const rows = yield* sql<{
         readonly threadId: string;
         readonly providerThreadId: string | null;

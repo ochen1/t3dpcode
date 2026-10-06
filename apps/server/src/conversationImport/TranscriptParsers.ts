@@ -1,10 +1,14 @@
-import {
-  EventId,
-  MessageId,
-  type OrchestrationMessage,
-  type OrchestrationThreadActivity,
-  TurnId,
-} from "@t3tools/contracts";
+import { EventId, MessageId, TurnId } from "@t3tools/contracts";
+interface OrchestrationMessage {
+  readonly id: MessageId;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+  readonly turnId: TurnId | null;
+  readonly streaming: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+type OrchestrationThreadActivity = ReturnType<typeof toolActivity>;
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
@@ -160,7 +164,7 @@ function toolActivity(input: {
   readonly result?: unknown;
   readonly isError?: boolean;
   readonly createdAt?: string;
-}): OrchestrationThreadActivity {
+}) {
   const presentation = classifyTool(input.call.name);
   const completed = input.nativeResult !== undefined;
   const command = commandFromToolInput(input.call.input);
@@ -170,7 +174,7 @@ function toolActivity(input: {
     id: EventId.make(
       `import:${input.provider}:${input.conversationId}:tool:${input.call.id}:${input.call.ordinal}`,
     ),
-    tone: input.isError ? "error" : "tool",
+    tone: input.isError ? ("error" as const) : ("tool" as const),
     kind: completed ? "tool.completed" : "tool.started",
     summary: presentation.title,
     payload: {
