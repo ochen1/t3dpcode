@@ -1,6 +1,49 @@
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderRuntimeTurnStatus, TurnTokenUsage } from "@t3tools/contracts";
 
+/** Adds the native turns Claude runs to answer steering within one T3 turn. */
+export function addClaudeTurnTokenUsage(
+  preceding: TurnTokenUsage | undefined,
+  current: TurnTokenUsage,
+): TurnTokenUsage {
+  if (preceding === undefined) return current;
+  const sum = (
+    key:
+      | "inputTokens"
+      | "outputTokens"
+      | "cachedInputTokens"
+      | "cacheCreationTokens"
+      | "reasoningTokens",
+  ) =>
+    preceding[key] === undefined && current[key] === undefined
+      ? undefined
+      : (preceding[key] ?? 0) + (current[key] ?? 0);
+  const combined = {
+    ...current,
+    hasSubagents: preceding.hasSubagents || current.hasSubagents,
+    inputTokens: sum("inputTokens"),
+    outputTokens: sum("outputTokens"),
+    cachedInputTokens: sum("cachedInputTokens"),
+    cacheCreationTokens: sum("cacheCreationTokens"),
+    reasoningTokens: sum("reasoningTokens"),
+  };
+  if (preceding.usageStatus === "complete" && current.usageStatus === "complete") {
+    return {
+      ...combined,
+      usageStatus: "complete",
+      inputTokens: preceding.inputTokens + current.inputTokens,
+      outputTokens: preceding.outputTokens + current.outputTokens,
+    };
+  }
+  return {
+    ...combined,
+    usageStatus:
+      preceding.usageStatus === "unavailable" && current.usageStatus === "unavailable"
+        ? "unavailable"
+        : "partial",
+  };
+}
+
 function finiteNonNegativeInteger(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? Math.round(value)

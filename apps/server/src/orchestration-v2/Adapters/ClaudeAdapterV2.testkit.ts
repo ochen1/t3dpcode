@@ -1322,6 +1322,7 @@ async function recordMessagesUntilTurnResults(input: {
   readonly entries: Array<ProviderReplayEntry>;
   readonly scenario: string;
   readonly resultCount: number;
+  readonly untilPromptUuid?: string;
 }): Promise<boolean> {
   let seenResults = 0;
   while (true) {
@@ -1340,7 +1341,11 @@ async function recordMessagesUntilTurnResults(input: {
     });
     if (replayMessage.type === "result") {
       seenResults += 1;
-      if (seenResults >= input.resultCount) {
+      const echoedUuids: unknown = Reflect.get(replayMessage, "user_message_uuids");
+      const answersPrompt =
+        Reflect.get(replayMessage, "user_message_uuid") === input.untilPromptUuid ||
+        (Array.isArray(echoedUuids) && echoedUuids.includes(input.untilPromptUuid));
+      if (input.untilPromptUuid === undefined ? seenResults >= input.resultCount : answersPrompt) {
         return true;
       }
     }
@@ -1653,9 +1658,11 @@ async function recordClaudeActiveSteeringQuery(input: {
 
   const promptQueue = new RecordingPromptQueue();
   const offeredPrompts = new Set<number>();
+  const promptUuids = await Promise.all(input.prompts.map(() => Effect.runPromise(randomUuidV4)));
   const offerPrompt = (index: number, priority?: SDKUserMessage["priority"]) => {
     const message = ClaudeAdapterV2.makeClaudeUserMessage({
       text: input.prompts[index]!,
+      uuid: promptUuids[index]! as NonNullable<SDKUserMessage["uuid"]>,
       ...(priority === undefined ? {} : { priority }),
     });
     input.entries.push({
@@ -1669,7 +1676,7 @@ async function recordClaudeActiveSteeringQuery(input: {
   const offerSteeringPrompts = () => {
     for (let index = 1; index < input.prompts.length; index += 1) {
       if (!offeredPrompts.has(index)) {
-        offerPrompt(index, "now");
+        offerPrompt(index, "next");
       }
     }
   };
@@ -1741,6 +1748,8 @@ async function recordClaudeActiveSteeringQuery(input: {
       entries: input.entries,
       scenario: input.scenario,
       resultCount: input.prompts.length,
+      // `next` can fold multiple prompts into one native turn and result.
+      untilPromptUuid: promptUuids.at(-1)!,
     });
     if (!completed) {
       throw new Error("Claude active steering query ended before the turn completed.");

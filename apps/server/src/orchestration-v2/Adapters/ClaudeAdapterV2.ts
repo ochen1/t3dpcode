@@ -5,7 +5,10 @@ import {
   formatSearchToolLabel,
 } from "@t3tools/shared/toolActivity";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
-import { normalizeClaudeTurnTokenUsage } from "../../provider/ClaudeTurnTokenUsage.ts";
+import {
+  addClaudeTurnTokenUsage,
+  normalizeClaudeTurnTokenUsage,
+} from "../../provider/ClaudeTurnTokenUsage.ts";
 import {
   type CanUseTool,
   forkSession as forkClaudeSession,
@@ -198,7 +201,7 @@ export const ClaudeProviderCapabilitiesV2 = {
     emitsTurnCompleted: true,
     supportsInterrupt: true,
     supportsActiveSteering: true,
-    activeSteeringInterruptsTools: true,
+    activeSteeringInterruptsTools: false,
     supportsSteeringByInterruptRestart: false,
     supportsQueuedMessages: true,
     terminalStatusQuality: "strong",
@@ -2745,6 +2748,8 @@ interface ActiveClaudeTurnContext {
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
   readonly pendingSubagentLaunchesByToolUseId: Map<string, PendingClaudeSubagentLaunch>;
+  readonly pendingSteeringPromptUuids: Set<string>;
+  precedingSteeringUsage: ReturnType<typeof normalizeClaudeTurnTokenUsage> | undefined;
   // Set on turns that offered a prompt. Claude runs a wake turn it queued
   // for background work before the next prompt's turn, and only the
   // prompt's turn echoes this uuid (see handleSdkMessage).
@@ -5042,11 +5047,14 @@ export function makeClaudeAdapterV2(
                     status: input.status,
                     completedAt: input.completedAt,
                   }),
-                  turnTokenUsage: normalizeClaudeTurnTokenUsage(
-                    input.result,
-                    input.context.subagentsByTaskId.size > 0 ||
-                      input.context.subagentsByToolUseId.size > 0,
-                    input.status,
+                  turnTokenUsage: addClaudeTurnTokenUsage(
+                    input.context.precedingSteeringUsage,
+                    normalizeClaudeTurnTokenUsage(
+                      input.result,
+                      input.context.subagentsByTaskId.size > 0 ||
+                        input.context.subagentsByToolUseId.size > 0,
+                      input.status,
+                    ),
                   ),
                 },
               }),
@@ -6436,24 +6444,6 @@ export function makeClaudeAdapterV2(
             });
           }
 
-          // Failed result text belongs on the terminal-failure item, including
-          // structured failures whose SDK result still has is_error=false.
-          const resultText =
-            message.type === "result" &&
-            ((message.subtype === "success" && message.is_error) ||
-              terminalStatusFromResult(message) === "failed")
-              ? null
-              : resultTextFromSdkMessage(message);
-          if (
-            context.assistant.emittedNativeItemIds.size === 0 &&
-            context.assistant.fallbackText.length === 0 &&
-            resultText !== null &&
-            resultText.text.length > 0
-          ) {
-            context.assistant.fallbackText = resultText.text;
-            context.assistant.fallbackNativeItemId = resultText.nativeItemId;
-          }
-
           if (message.type === "result") {
             const completedAt = yield* DateTime.now;
             const interrupted = (yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
@@ -6461,6 +6451,46 @@ export function makeClaudeAdapterV2(
             if (!interrupted && wasSteered && isClaudeActiveSteeringAbortResult(message)) {
               return;
             }
+            const echoedPrompts = claudeEchoedPromptUuids(message);
+            for (const uuid of echoedPrompts) {
+              context.pendingSteeringPromptUuids.delete(uuid);
+            }
+            // A steer can arrive after the current native turn's last tool
+            // boundary. Keep the T3 turn open until Claude answers it, even
+            // when the preceding native turn completes successfully.
+            if (
+              !interrupted &&
+              terminalStatusFromResult(message) === "completed" &&
+              context.pendingSteeringPromptUuids.size > 0 &&
+              (echoedPrompts.length > 0 || (message.queued_turn_count ?? 0) > 0)
+            ) {
+              context.precedingSteeringUsage = addClaudeTurnTokenUsage(
+                context.precedingSteeringUsage,
+                normalizeClaudeTurnTokenUsage(
+                  message,
+                  context.subagentsByTaskId.size > 0 || context.subagentsByToolUseId.size > 0,
+                  "completed",
+                ),
+              );
+              return;
+            }
+            // Failed result text belongs on the terminal-failure item, including
+            // structured failures whose SDK result still has is_error=false.
+            const resultText =
+              (message.subtype === "success" && message.is_error) ||
+              terminalStatusFromResult(message) === "failed"
+                ? null
+                : resultTextFromSdkMessage(message);
+            if (
+              context.assistant.emittedNativeItemIds.size === 0 &&
+              context.assistant.fallbackText.length === 0 &&
+              resultText !== null &&
+              resultText.text.length > 0
+            ) {
+              context.assistant.fallbackText = resultText.text;
+              context.assistant.fallbackNativeItemId = resultText.nativeItemId;
+            }
+
             yield* Ref.update(steeredTurns, (current) => {
               const next = new Set(current);
               next.delete(context.providerTurnId);
@@ -6604,7 +6634,11 @@ export function makeClaudeAdapterV2(
             yield* handleRoutedSdkMessage(input);
             return;
           }
-          if (claudeEchoedPromptUuids(message).includes(context.promptUuid)) {
+          if (
+            claudeEchoedPromptUuids(message).some(
+              (uuid) => uuid === context.promptUuid || context.pendingSteeringPromptUuids.has(uuid),
+            )
+          ) {
             if (
               liveQuery.promptEchoMode === "unknown" ||
               liveQuery.promptEchoMode === "acknowledged"
@@ -7308,6 +7342,8 @@ export function makeClaudeAdapterV2(
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
               subagentNodesByTaskId: new Map(),
+              pendingSteeringPromptUuids: new Set(),
+              precedingSteeringUsage: undefined,
               pendingSubagentLaunchesByToolUseId: new Map(),
               promptUuid,
               promptEcho: isClaudeProviderContinuationTurn(turnInput) ? "confirmed" : "pending",
@@ -7530,13 +7566,19 @@ export function makeClaudeAdapterV2(
                 detail: `Claude provider turn ${turnInput.providerTurnId} is not the active turn.`,
               });
             }
+            const steeringUuid = yield* claudePromptUuid(
+              `steer:${turnInput.message.messageId}`,
+            ).pipe(Effect.provideService(Crypto.Crypto, crypto));
             const userMessage = yield* makeClaudeUserMessageWithAttachments({
               text: applyClaudePromptEffortPrefix(
                 turnInput.message.text,
                 compileClaudeModelSelection(currentTurn.input.modelSelection).promptEffort,
               ),
               attachments: turnInput.message.attachments,
-              priority: "now",
+              // `now` aborts the root and its running subagents. `next`
+              // folds the steer in at a tool boundary without stopping work.
+              priority: "next",
+              uuid: steeringUuid,
               attachmentsDir,
               fileSystem,
               skillNames: yield* userInvocableSkillNames(currentTurn.input.runtimePolicy.cwd),
@@ -7546,7 +7588,14 @@ export function makeClaudeAdapterV2(
               next.add(turnInput.providerTurnId);
               return next;
             });
-            yield* existing.query.offer(userMessage);
+            currentTurn.pendingSteeringPromptUuids.add(steeringUuid);
+            yield* existing.query.offer(userMessage).pipe(
+              Effect.tapError(() =>
+                Effect.sync(() => {
+                  currentTurn.pendingSteeringPromptUuids.delete(steeringUuid);
+                }),
+              ),
+            );
           },
           (effect, turnInput) =>
             effect.pipe(

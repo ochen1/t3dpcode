@@ -122,7 +122,7 @@ const result = (uuid: string, aborted: boolean) =>
   });
 
 it.effect.each(["child completion", "scheduled message", "user steering"] as const)(
-  "delivers %s with Claude's native pending-tool cancellation behavior",
+  "delivers %s without cancelling Claude's pending tools",
   (delivery) =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -343,9 +343,9 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
             });
           }
           yield* worker.drain();
-          const explicitSteer = delivery === "user steering";
-          assert.equal(batchAbort.signal.aborted, explicitSteer);
-          assert.equal(offers.length, explicitSteer ? 2 : 1);
+          const liveDelivery = delivery !== "scheduled message";
+          assert.isFalse(batchAbort.signal.aborted);
+          assert.equal(offers.length, liveDelivery ? 2 : 1);
           const finished = yield* watch(
             (event) =>
               event.type === "run.updated" &&
@@ -356,13 +356,12 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
           yield* Queue.offer(sdkMessages, toolResult("build", false));
           for (const id of statusIds)
             yield* Queue.offer(sdkMessages, toolResult(id, batchAbort.signal.aborted));
-          if (explicitSteer) yield* Queue.offer(sdkMessages, result("aborted", true));
           yield* Queue.offer(sdkMessages, result("completed", false));
           yield* Fiber.join(finished);
           yield* worker.drain();
           yield* orchestrator.resumeQueuedRuns;
           yield* worker.drain();
-          if (!explicitSteer) {
+          if (!liveDelivery) {
             const queued = (yield* orchestrator.getThreadProjection(threadId)).runs[1]!;
             const noticeFinished = yield* watch(
               (event) =>
@@ -370,18 +369,9 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
                 event.payload.id === queued.id &&
                 event.payload.status === "waiting",
             );
-            const delivered =
-              delivery === "child completion"
-                ? yield* watch(
-                    (event) =>
-                      event.type === "subagent.updated" &&
-                      event.payload.completionDelivery?.state === "delivered",
-                  )
-                : null;
             yield* Queue.offer(sdkMessages, result("notice-completed", false));
             yield* Fiber.join(noticeFinished);
             yield* worker.drain();
-            if (delivered !== null) yield* Fiber.join(delivered);
           }
           const after = yield* orchestrator.getThreadProjection(threadId);
           const reads = after.turnItems.filter((item) =>
@@ -389,26 +379,25 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
           );
           assert.equal(reads.length, 4);
           for (const read of reads) {
-            assert.equal(read.status, explicitSteer ? "cancelled" : "completed");
-            assert.equal(read.toolNonExecutionKind, explicitSteer ? "cancelled" : undefined);
-            assert.equal(read.type === "dynamic_tool" && read.output === refusal, explicitSteer);
+            assert.equal(read.status, "completed");
+            assert.isUndefined(read.toolNonExecutionKind);
+            assert.isFalse(read.type === "dynamic_tool" && read.output === refusal);
           }
           assert.equal(offers.length, 2);
+          assert.isFalse(offers.some((offer) => offer.priority === "now"));
           assert.equal(
-            offers.filter((offer) => offer.priority === "now").length,
-            explicitSteer ? 1 : 0,
+            offers.filter((offer) => offer.priority === "next").length,
+            liveDelivery ? 1 : 0,
           );
-          if (!explicitSteer) {
-            assert.equal(after.runs.length, 2);
-            if (delivery === "child completion") {
-              assert.equal(after.messages.filter((message) => message.id === messageId).length, 1);
-              assert.equal(after.subagents[0]?.completionDelivery?.state, "delivered");
-            } else {
-              assert.equal(
-                after.messages.filter((message) => message.scheduledTaskId !== undefined).length,
-                1,
-              );
-            }
+          assert.equal(after.runs.length, liveDelivery ? 1 : 2);
+          if (delivery === "child completion") {
+            assert.equal(after.messages.filter((message) => message.id === messageId).length, 1);
+            assert.equal(after.subagents[0]?.completionDelivery?.state, "delivered");
+          } else if (delivery === "scheduled message") {
+            assert.equal(
+              after.messages.filter((message) => message.scheduledTaskId !== undefined).length,
+              1,
+            );
           }
           yield* orchestrator.recoverDelegatedTasks;
           yield* orchestrator.resumeQueuedRuns;

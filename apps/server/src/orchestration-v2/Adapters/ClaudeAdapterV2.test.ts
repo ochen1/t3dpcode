@@ -1534,7 +1534,7 @@ describe("ClaudeAdapterV2 attachments", () => {
           },
         });
 
-        assert.equal(offeredMessages[1]?.priority, "now");
+        assert.equal(offeredMessages[1]?.priority, "next");
         assert.deepEqual(offeredMessages[1]?.message.content, [
           expectedImageBlock,
           {
@@ -2611,7 +2611,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               attachments: [],
             },
           });
-          assert.equal(harness.offeredMessages[1]?.priority, "now");
+          assert.equal(harness.offeredMessages[1]?.priority, "next");
         }
         yield* Queue.offer(
           harness.sdkMessages,
@@ -5854,6 +5854,168 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       );
     return { childThreadId, toolThreadIds, assistantTexts };
   };
+
+  it.effect.each([false, true])(
+    "keeps running subagents through steering with background=%s",
+    (background) =>
+      Effect.gen(function* () {
+        let closeCalls = 0;
+        const harness = yield* makeWakeHarnessWithOptions({
+          interrupt: Effect.die("Steering must not interrupt Claude"),
+          close: () =>
+            Effect.sync(() => {
+              closeCalls++;
+            }),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("steer-subagents"),
+          text: "Run two auditors.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        const agents = ["one", "two"].map((id) => ({
+          taskId: `task-steer-${id}`,
+          toolUseId: `toolu-steer-${id}`,
+        }));
+        for (const agent of agents) {
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              ...makeSubagentTaskStartedFrame({ ...agent, uuid: `start-${agent.taskId}` }),
+              is_backgrounded: background,
+            }),
+          );
+        }
+        yield* harness.runtime.steerTurn({
+          threadId: harness.threadId,
+          runId: input.runId,
+          providerThread: harness.providerThread,
+          providerTurnId: idAllocator.derive.providerTurn({
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeTurnId: `turn:${input.attemptId}`,
+          }),
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: MessageId.make("steer-auditors"),
+            text: "Also check performance.",
+            attachments: [],
+          },
+        });
+        assert.equal(harness.offeredMessages[1]?.priority, "next");
+        assert.equal(closeCalls, 0);
+        for (const agent of agents) {
+          for (const frame of makeSubagentAssistantFrames({
+            parentToolUseId: agent.toolUseId,
+            uuid: `after-steer-${agent.taskId}`,
+            text: `Finished ${agent.taskId} after steering.`,
+          })) {
+            yield* harness.offerAndWait(frame);
+          }
+          yield* harness.offerAndWait(
+            makeSubagentNotificationFrame({
+              ...agent,
+              uuid: `end-${agent.taskId}`,
+              summary: `Finished ${agent.taskId} after steering.`,
+            }),
+          );
+        }
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            ...makeResultFrame({ uuid: "steered-result", result: "Both auditors finished." }),
+            user_message_uuids: harness.offeredMessages.map((message) => message.uuid),
+          }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+        const completedAgents = harness.events.flatMap((event) =>
+          event.type === "subagent.updated" && event.subagent.status === "completed"
+            ? [event.subagent]
+            : [],
+        );
+        assert.lengthOf(completedAgents, 2);
+        assert.isFalse(
+          harness.events.some(
+            (event) =>
+              event.type === "subagent.updated" &&
+              ["interrupted", "cancelled", "failed"].includes(event.subagent.status),
+          ),
+        );
+        assert.lengthOf(harness.terminalEvents(), 1);
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect.each(["echo", "queue_count"] as const)(
+    "waits for every steer after a successful native result using %s",
+    (receipt) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const input = makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("steer-after-boundary"),
+          text: "Audit the app.",
+          attachments: [],
+        });
+        yield* harness.runtime.startTurn(input);
+        for (const text of ["Check performance.", "Check mobile too."]) {
+          yield* harness.runtime.steerTurn({
+            threadId: harness.threadId,
+            runId: input.runId,
+            providerThread: harness.providerThread,
+            providerTurnId: idAllocator.derive.providerTurn({
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeTurnId: `turn:${input.attemptId}`,
+            }),
+            message: {
+              createdBy: "user",
+              creationSource: "web",
+              messageId: MessageId.make(text),
+              text,
+              attachments: [],
+            },
+          });
+        }
+        for (const index of [0, 1, 2]) {
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              ...makeResultFrame({ uuid: `result-${index}`, result: `Report ${index}` }),
+              ...(receipt === "echo"
+                ? { user_message_uuids: [harness.offeredMessages[index]!.uuid] }
+                : { queued_turn_count: 2 - index }),
+            }),
+          );
+          if (index < 2) assert.isEmpty(harness.terminalEvents());
+        }
+        yield* Queue.take(harness.terminalReceipts);
+        assert.lengthOf(harness.terminalEvents(), 1);
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
+        assert.isTrue(
+          harness.events.some(
+            (event) => event.type === "message.updated" && event.message.text === "Report 2",
+          ),
+        );
+        assert.isFalse(
+          harness.events.some(
+            (event) => event.type === "message.updated" && event.message.text === "Report 0",
+          ),
+        );
+        const finished = harness.events.findLast((event) => event.type === "provider_turn.updated");
+        assert.equal(finished?.type, "provider_turn.updated");
+        if (finished?.type === "provider_turn.updated") {
+          assert.include(finished.providerTurn.turnTokenUsage, {
+            usageStatus: "complete",
+            inputTokens: 3,
+            outputTokens: 3,
+          });
+        }
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
 
   it.effect("a subagent re-run in the foreground does not join a later wake", () =>
     Effect.scoped(
