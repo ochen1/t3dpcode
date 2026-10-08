@@ -65,4 +65,20 @@ describe("mergeProviderInstanceEnvironment", () => {
       PATH: "/bin",
     });
   });
+
+  it("does not pass the host app XPC identity to provider processes", () => {
+    expect(
+      mergeProviderInstanceEnvironment(
+        [
+          { name: "XPC_FLAGS", value: "override", sensitive: false },
+          { name: "XPC_SERVICE_NAME", value: "override", sensitive: false },
+        ],
+        {
+          PATH: "/bin",
+          XPC_FLAGS: "0x2",
+          XPC_SERVICE_NAME: "0",
+        },
+      ),
+    ).toEqual({ PATH: "/bin" });
+  });
 });

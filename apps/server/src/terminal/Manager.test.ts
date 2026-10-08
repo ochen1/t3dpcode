@@ -2008,6 +2008,8 @@ it.layer(
           PORT: "5173",
           T3CODE_PORT: "3773",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
+          XPC_FLAGS: "0x2",
+          XPC_SERVICE_NAME: "0",
           TEST_TERMINAL_KEEP: "keep-me",
         },
       });
@@ -2019,6 +2021,8 @@ it.layer(
       expect(spawnInput.env.PORT).toBeUndefined();
       expect(spawnInput.env.T3CODE_PORT).toBeUndefined();
       expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined();
+      expect(spawnInput.env.XPC_FLAGS).toBeUndefined();
+      expect(spawnInput.env.XPC_SERVICE_NAME).toBeUndefined();
       // Arbitrary host env vars must pass through — terminals inherit the
       // user's environment apart from the explicit blocklist.
       expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe("keep-me");
