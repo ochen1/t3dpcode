@@ -33,7 +33,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { importForkTranscript } from "../../conversationImport/importForkTranscript.ts";
 import { nativeConversationThread } from "../../conversationImport/nativeConversationThread.ts";
 import * as EventSink from "../EventSink.ts";
-import { randomUuidV4 } from "../RandomUuid.ts";
+import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 
 const IMPORT_EVENT_PREFIX = "migration:v1";
 const TRANSCRIPT_EVENT_BATCH_SIZE = 100;
