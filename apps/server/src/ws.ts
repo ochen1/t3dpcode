@@ -1813,16 +1813,9 @@ const layerWsRpc = (
 
       const conversationImport = yield* ConversationImport;
       const handlers = ServerWsRpcGroup.of({
-        "orchestration.listExternalConversations": (input) =>
-          observeRpcEffect(
-            "orchestration.listExternalConversations",
-            conversationImport.list(input),
-          ),
+        "orchestration.listExternalConversations": (input) => conversationImport.list(input),
         "orchestration.importExternalConversation": (input) =>
-          observeRpcEffect(
-            "orchestration.importExternalConversation",
-            conversationImport.importConversation(input),
-          ),
+          conversationImport.importConversation(input),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

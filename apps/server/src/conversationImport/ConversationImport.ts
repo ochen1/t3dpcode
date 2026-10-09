@@ -27,13 +27,13 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { expandHomePath } from "../pathExpansion.ts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
 import { ProviderSessionRuntimeRepository } from "../persistence/ProviderSessionRuntime.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { EventSinkV2 } from "../orchestration-v2/EventSink.ts";
-import { deriveProviderThread } from "../orchestration-v2/IdAllocator.ts";
+import { deriveProviderThread } from "@t3tools/provider-core/server/IdAllocator";
 import { ProjectService } from "../project/ProjectService.ts";
 import { externalConversationEvents } from "./externalConversationEvents.ts";
 

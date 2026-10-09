@@ -6301,7 +6301,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         assert.lengthOf(harness.terminalEvents(), 1);
         assert.equal(harness.terminalEvents()[0]?.status, "completed");
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
   );
 
   it.effect.each(["echo", "queue_count"] as const)(
@@ -6370,7 +6375,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             outputTokens: 3,
           });
         }
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
   );
 
   it.effect("a subagent re-run in the foreground does not join a later wake", () =>

@@ -2757,7 +2757,6 @@ interface ActiveClaudeTurnContext {
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
-  readonly pendingSubagentLaunchesByToolUseId: Map<string, PendingClaudeSubagentLaunch>;
   readonly pendingSteeringPromptUuids: Set<string>;
   precedingSteeringUsage: ReturnType<typeof normalizeClaudeTurnTokenUsage> | undefined;
   // Set on turns that offered a prompt. Claude runs a wake turn it queued
@@ -7587,7 +7586,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               subagentNodesByTaskId: new Map(),
               pendingSteeringPromptUuids: new Set(),
               precedingSteeringUsage: undefined,
-              pendingSubagentLaunchesByToolUseId: new Map(),
               promptUuid,
               promptEcho: isClaudeProviderContinuationTurn(turnInput) ? "confirmed" : "pending",
               promptStarted: false,
@@ -7810,9 +7808,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 detail: `Claude provider turn ${turnInput.providerTurnId} is not the active turn.`,
               });
             }
-            const steeringUuid = yield* claudePromptUuid(
-              `steer:${turnInput.message.messageId}`,
-            ).pipe(Effect.provideService(Crypto.Crypto, crypto));
+            const steeringUuid = yield* crypto.randomUUIDv4.pipe(
+              Effect.filterOrFail(isClaudePromptUuid),
+            );
             const userMessage = yield* makeClaudeUserMessageWithAttachments({
               text: applyClaudePromptEffortPrefix(
                 turnInput.message.text,
