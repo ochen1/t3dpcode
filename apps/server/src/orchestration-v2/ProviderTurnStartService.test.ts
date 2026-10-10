@@ -2,6 +2,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ContextTransferId,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -171,6 +172,7 @@ function makeLocalCommandHarness(input: {
   readonly writeFailure?: unknown;
   /** Loads the thread and starts the run, then fails every later state read. */
   readonly failReadsAfterRunning?: boolean;
+  readonly nativeForkRef?: "same" | "replaced";
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
@@ -208,7 +210,14 @@ function makeLocalCommandHarness(input: {
     providerSessionId,
     appThreadId: threadId,
     ownerNodeId: null,
-    nativeThreadRef: null,
+    nativeThreadRef:
+      input.nativeForkRef === undefined
+        ? null
+        : {
+            driver: ProviderDriverKind.make("codex"),
+            nativeId: "native-fork-session",
+            strength: "strong",
+          },
     nativeConversationHeadRef: null,
     status: "not_loaded",
     firstRunOrdinal: 2,
@@ -333,7 +342,40 @@ function makeLocalCommandHarness(input: {
     providerSessions: [],
     providerTurns: [],
     contextHandoffs: [],
-    contextTransfers: [],
+    contextTransfers:
+      input.nativeForkRef === undefined
+        ? []
+        : [
+            {
+              id: ContextTransferId.make("persisted-native-fork"),
+              type: "fork",
+              sourceThreadId: ThreadId.make("fork-source"),
+              targetThreadId: threadId,
+              sourcePoint: {
+                threadId: ThreadId.make("fork-source"),
+                runId: RunId.make("fork-source-run"),
+              },
+              basePoint: null,
+              sourceProviderInstanceId: newInstanceId,
+              targetProviderInstanceId: newInstanceId,
+              targetRunId: RunId.make("previous-fork-run"),
+              status: "consumed",
+              resolution: {
+                strategy: "native_fork",
+                providerThreadRef: {
+                  driver: providerThread.driver,
+                  nativeId:
+                    input.nativeForkRef === "same" ? "native-fork-session" : "replaced-session",
+                  strength: "strong",
+                },
+              },
+              createdBy: "user",
+              error: null,
+              createdAt: now,
+              updatedAt: now,
+              consumedAt: now,
+            },
+          ],
     turnItems: [],
     visibleTurnItems: [],
     runtimeRequests: [],
@@ -430,6 +472,7 @@ function makeLocalCommandHarness(input: {
                     lastError: null,
                   },
                   ensureThread: () => Effect.succeed(providerThread),
+                  resumeThread: () => Effect.succeed(providerThread),
                 } as never)
               : Effect.die("A local command must not open a native session."),
   );
@@ -753,6 +796,22 @@ effectIt.effect("does not mistake a failed state read for a superseded run", () 
     const finalizeCheck = yield* Effect.flip(controls.shouldFinalizeRun!());
     expect(startCheck._tag).toBe("ProjectionStoreReadError");
     expect(finalizeCheck._tag).toBe("ProjectionStoreReadError");
+  }),
+);
+
+effectIt.effect.each([
+  { nativeForkRef: "same" as const, hasTurns: true },
+  { nativeForkRef: "replaced" as const, hasTurns: false },
+])("preserves native fork context only for its copied session: $nativeForkRef", (testCase) =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      failReadsAfterRunning: true,
+      nativeForkRef: testCase.nativeForkRef,
+    });
+    yield* harness.start;
+    expect(harness.startRootRun).toHaveBeenCalledTimes(1);
+    expect(harness.startRootRun.mock.calls[0]?.[0].nativeThreadHasTurns).toBe(testCase.hasTurns);
   }),
 );
 

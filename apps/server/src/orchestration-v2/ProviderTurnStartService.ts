@@ -1250,6 +1250,19 @@ export const layer: Layer.Layer<
         // Legacy accepted attempts have no native id. They count only before
         // a replacement, while no accepted attempt records a native identity.
         nativeThreadHasTurns:
+          // A native fork contains source turns before it has any accepted
+          // local attempts. Keep this fact across provider runtime releases,
+          // but only for the copied native id, not a fresh-session fallback.
+          nativeForkTransfer !== undefined ||
+          projection.contextTransfers.some(
+            (transfer) =>
+              transfer.type === "fork" &&
+              transfer.targetThreadId === input.threadId &&
+              transfer.resolution?.strategy === "native_fork" &&
+              transfer.resolution.providerThreadRef.nativeId !== null &&
+              transfer.resolution.providerThreadRef.nativeId ===
+                runningProviderThread.nativeThreadRef?.nativeId,
+          ) ||
           nativeInputRunIds.size > 0 ||
           (legacyInputRunIds.size > 0 &&
             sameNativeThread &&

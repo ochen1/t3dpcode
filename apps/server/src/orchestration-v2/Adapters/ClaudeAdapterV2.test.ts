@@ -2275,6 +2275,46 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
 
+  it.effect("keeps the main assistant cursor when a subagent replies before the result", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("fork-main-cursor"),
+          text: "Complete the work",
+          attachments: [],
+        }),
+      );
+      const mainUuid = "00000000-0000-4000-8000-000000000401";
+      yield* harness.offerAndWait(makeAssistantTextFrame({ uuid: mainUuid, text: "Done" }));
+      yield* harness.offerAndWait(
+        makeAssistantErrorFrame({
+          uuid: "00000000-0000-4000-8000-000000000402",
+          error: undefined,
+          parentToolUseId: "subagent-launch",
+        }),
+      );
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000403", result: "Done" }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+      const completed = harness.events.findLast((event) => event.type === "provider_turn.updated");
+      assert.equal(completed?.type, "provider_turn.updated");
+      if (completed?.type === "provider_turn.updated") {
+        assert.equal(completed.providerTurn.nativeTurnRef?.nativeId, mainUuid);
+      }
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
   it.effect.each([
     { isError: false, title: "Check weather" },
     { isError: true, title: "Check weather" },
