@@ -1,4 +1,4 @@
-import * as NodeOS from "node:os";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import {
   ClaudeSettings,
@@ -195,6 +195,7 @@ const makeConversationImport = Effect.gen(function* () {
     });
 
   const readSources = Effect.fn("ConversationImport.readSources")(function* () {
+    const home = yield* HostProcess.HomeDirectory;
     const settings = yield* settingsService.getSettings.pipe(
       Effect.mapError((cause) =>
         fail("provider-unavailable", "Could not read provider settings.", cause),
@@ -211,12 +212,12 @@ const makeConversationImport = Effect.gen(function* () {
         const configuredRoot =
           config.homePath.trim() ||
           environmentValue(envelope.environment, "CLAUDE_CONFIG_DIR") ||
-          path.join(environmentValue(envelope.environment, "HOME") ?? NodeOS.homedir(), ".claude");
+          path.join(environmentValue(envelope.environment, "HOME") ?? home, ".claude");
         sources.push({
           provider: "claudeAgent",
           providerInstanceId,
           providerLabel: envelope.displayName ?? "Claude Code",
-          root: path.resolve(expandHomePath(configuredRoot)),
+          root: path.resolve(expandHomePath(configuredRoot, home)),
         });
       } else if (envelope.driver === "codex") {
         const config = Option.getOrUndefined(decodeCodexSettings(envelope.config ?? {}));
@@ -224,12 +225,12 @@ const makeConversationImport = Effect.gen(function* () {
         const configuredRoot =
           config.homePath.trim() ||
           environmentValue(envelope.environment, "CODEX_HOME") ||
-          path.join(environmentValue(envelope.environment, "HOME") ?? NodeOS.homedir(), ".codex");
+          path.join(environmentValue(envelope.environment, "HOME") ?? home, ".codex");
         sources.push({
           provider: "codex",
           providerInstanceId,
           providerLabel: envelope.displayName ?? "Codex",
-          root: path.resolve(expandHomePath(configuredRoot)),
+          root: path.resolve(expandHomePath(configuredRoot, home)),
         });
       }
     }
