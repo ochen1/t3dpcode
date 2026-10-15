@@ -75,13 +75,39 @@ describe("fork database upgrade", () => {
       assert.deepEqual(yield* runMigrations(), [
         [59, "McpAppModelContext"],
         [60, "ThreadSnapshotWindowIndexes"],
-        [61, "SelfHostedPushDevices"],
+        [61, "PullRequestReviewGuides"],
+        [62, "ThreadFailureLookupIndex"],
+        [63, "SelfHostedPushDevices"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
       assert.deepEqual(
         yield* sql`SELECT name FROM sqlite_master WHERE name = 'mcp_app_model_context'`,
         [{ name: "mcp_app_model_context" }],
+      );
+      assert.deepEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("upgrades push devices recorded at 61 before running upstream migrations", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 60 });
+      yield* Migrator.make({})({
+        loader: Migrator.fromRecord({ "61_SelfHostedPushDevices": ForkPush }),
+      });
+      yield* sql`INSERT INTO self_hosted_push_devices VALUES ('phone', 'ExponentPushToken[token]', 'Phone', '2026-10-15')`;
+      const pushHistory = yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id = 61`;
+      assert.deepEqual(yield* runMigrations(), [
+        [61, "PullRequestReviewGuides"],
+        [62, "ThreadFailureLookupIndex"],
+        [63, "SelfHostedPushDevices"],
+      ]);
+      assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
+      assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
+      assert.deepEqual(
+        yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_review_guides'`,
+        [{ name: "pull_request_review_guides" }],
       );
       assert.deepEqual(yield* runMigrations(), []);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
