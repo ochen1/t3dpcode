@@ -78,6 +78,7 @@ describe("fork database upgrade", () => {
         [61, "PullRequestReviewGuides"],
         [62, "ThreadFailureLookupIndex"],
         [63, "SelfHostedPushDevices"],
+        [64, "RuntimeRecoveryReadIndexes"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
@@ -102,6 +103,7 @@ describe("fork database upgrade", () => {
         [61, "PullRequestReviewGuides"],
         [62, "ThreadFailureLookupIndex"],
         [63, "SelfHostedPushDevices"],
+        [64, "RuntimeRecoveryReadIndexes"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);

@@ -1,3 +1,6 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { assert, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -690,7 +693,89 @@ it.effect("memory shell snapshots scope to one project", () =>
   ),
 );
 
+it.effect("runtime recovery uses the reader worker", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-recovery-reads-" });
+    yield* Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = yield* addRolledBackRecoveryCandidate("reader-worker");
+      const connections: Array<unknown> = [];
+      const tracer = Tracer.make({
+        span(options) {
+          const span = new Tracer.NativeSpan(options);
+          const end = span.end.bind(span);
+          span.end = (time, exit) => {
+            end(time, exit);
+            if (span.name === "sql.transaction")
+              connections.push(span.attributes.get("db.connection"));
+          };
+          return span;
+        },
+      });
+      yield* store.getRuntimeRecoveryProjection(threadId).pipe(Effect.withTracer(tracer));
+      assert.deepEqual(connections, ["reader"]);
+    }).pipe(
+      Effect.provide(
+        ProjectionStore.layer.pipe(
+          Layer.provideMerge(SqlitePersistence.layerFromPath(path.join(directory, "state.sqlite"))),
+        ),
+      ),
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.layer(layerTest)("ProjectionStoreV2", (it) => {
+  it.effect("recovery reads active items without walking completed history", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = yield* addRolledBackRecoveryCandidate("bounded-recovery");
+      // Invalid historical payloads prove recovery never decodes completed work.
+      yield* sql`
+        WITH RECURSIVE history(n) AS (SELECT 2 UNION ALL SELECT n + 1 FROM history WHERE n < 2000)
+        INSERT INTO orchestration_v2_projection_turn_items
+          (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
+        SELECT 'history:' || n, ${threadId}, 'completed-run', n, 'command_execution', 'completed',
+          '2026-10-15', 'not-json' FROM history
+      `;
+      const { statements, tracer } = traceSqlStatements();
+      const recovery = yield* store
+        .getRuntimeRecoveryProjection(threadId)
+        .pipe(Effect.withTracer(tracer));
+      assert.deepEqual(
+        recovery.turnItems.map((item) => item.id),
+        [TurnItemId.make("item:bounded-recovery:rolled-back")],
+      );
+      assert.deepEqual(
+        recovery.runs.map((run) => run.id),
+        [RunId.make("run:bounded-recovery:rolled-back")],
+      );
+      for (const statement of statements.filter((query) =>
+        query.trimStart().startsWith("SELECT"),
+      )) {
+        const plan = (yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${statement}`,
+        )).map((row) => row.detail);
+        assert.isFalse(
+          plan.some((detail) => /^SCAN (provider_thread|session)\b/.test(detail)),
+          plan.join("\n"),
+        );
+        for (const detail of plan.filter((row) => row.startsWith("SEARCH item "))) {
+          assert.include(detail, "turn_items_live_idx");
+        }
+        if (statement.includes("FROM orchestration_v2_projection_runs AS run NOT INDEXED")) {
+          assert.include(plan, "SEARCH run USING INTEGER PRIMARY KEY (rowid=?)");
+        }
+      }
+      const runId = recovery.runs[0]!.id;
+      assert.equal((yield* store.getRun(threadId, runId))?.status, "rolled_back");
+      assert.isUndefined(yield* store.getRun(ThreadId.make("other-thread"), runId));
+      assert.isUndefined(yield* store.getRun(threadId, RunId.make("missing-run")));
+    }),
+  );
+
   it.effect(
     "SQL recovery selects unfinished runless native subagents",
     () => runlessNativeSubagentNeedsRecovery,

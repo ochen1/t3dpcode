@@ -78,6 +78,7 @@ import Migration0059 from "./Migrations/059_McpAppModelContext.ts";
 import Migration0060 from "./Migrations/060_ThreadSnapshotWindowIndexes.ts";
 import Migration0061 from "./Migrations/061_PullRequestReviewGuides.ts";
 import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
+import Migration0064 from "./Migrations/064_RuntimeRecoveryReadIndexes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -155,6 +156,7 @@ export const migrationEntries = [
   [61, "PullRequestReviewGuides", Migration0061],
   [62, "ThreadFailureLookupIndex", Migration0062],
   [63, "SelfHostedPushDevices", ForkPushMigration],
+  [64, "RuntimeRecoveryReadIndexes", Migration0064],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

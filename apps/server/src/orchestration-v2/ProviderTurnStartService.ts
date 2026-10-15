@@ -133,9 +133,8 @@ export const layer: Layer.Layer<
       // `false` means the run moved on or is gone. A failed read is an error,
       // so the caller fails the start or the run instead of skipping it.
       const isCurrentAttemptInStatus = (expectedStatus: OrchestrationV2Run["status"]) =>
-        projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
-          Effect.map((current) => {
-            const run = current.runs.find((candidate) => candidate.id === input.runId);
+        projectionStore.getRun(input.threadId, input.runId).pipe(
+          Effect.map((run) => {
             return run?.activeAttemptId === input.attemptId && run.status === expectedStatus;
           }),
         );
@@ -156,9 +155,8 @@ export const layer: Layer.Layer<
           ),
         shouldStartProviderTurn: () => isCurrentAttemptInStatus("running"),
         shouldFinalizeRun: () =>
-          projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
-            Effect.map((current) => {
-              const run = current.runs.find((candidate) => candidate.id === input.runId);
+          projectionStore.getRun(input.threadId, input.runId).pipe(
+            Effect.map((run) => {
               return (
                 run?.activeAttemptId === input.attemptId &&
                 (run.status === "starting" || run.status === "running")

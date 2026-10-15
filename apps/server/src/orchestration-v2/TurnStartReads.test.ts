@@ -201,6 +201,9 @@ it.effect.each(["sqlite", "memory"] as const)(
             'tool_call', 'completed', 2, ${DateTime.formatIso(now)}, '{"obsolete":true}')`;
         assert.equal((yield* Effect.exit(store.getThreadProjection(threadId)))._tag, "Failure");
       }
+      assert.deepEqual(yield* store.getRun(threadId, runId), run);
+      assert.isUndefined(yield* store.getRun(ThreadId.make("unrelated-thread"), runId));
+      assert.isUndefined(yield* store.getRun(threadId, RunId.make("missing-run")));
       const selected = yield* store.getThreadRecords(threadId, ["runs", "messages"], {
         runIds: [runId],
         messageIds: [messageId],
