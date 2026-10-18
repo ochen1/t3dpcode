@@ -22,6 +22,7 @@ import {
   RunAttemptId,
   RunId,
   RuntimeRequestId,
+  ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -1726,6 +1727,79 @@ layer("ProviderEventIngestorV2", (it) => {
       assert.equal(threadEvents[0]?.threadId, childThreadId);
       assert.equal(messageEvents[0]?.type, "message.updated");
       assert.equal(messageEvents[0]?.threadId, childThreadId);
+    }),
+  );
+
+  it.effect("restores a recovered native subagent's missing child conversation", () =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const rootEvent = yield* threadCreatedEvent(now);
+      if (rootEvent.type !== "thread.created") throw new Error("Expected a thread fixture");
+      yield* eventSink.write({ events: [rootEvent] });
+      const childThreadId = ThreadId.make("thread:recovered-native-subagent");
+      const nodeId = NodeId.make("node:recovered-native-subagent");
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: rootEvent.threadId,
+      });
+      const event = {
+        type: "subagent.updated",
+        driver: CODEX_DRIVER,
+        subagent: {
+          id: nodeId,
+          threadId: rootEvent.threadId,
+          runId: null,
+          parentNodeId: NodeId.make("node:root"),
+          origin: "provider_native",
+          createdBy: "agent",
+          driver: CODEX_DRIVER,
+          providerInstanceId: modelSelection.instanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Continue reviewing",
+          title: "Recovered reviewer",
+          model: "gpt-6.1-sol",
+          status: "running",
+          result: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        },
+      } satisfies ProviderEventIngestor.ProviderEventIngestInput["event"];
+      const ingest = () =>
+        ingestor.ingestNormalized({
+          providerSessionId,
+          providerInstanceId: modelSelection.instanceId,
+          threadId: rootEvent.threadId,
+          event,
+        });
+      const first = yield* ingest();
+      const child = yield* projectionStore.getThread(childThreadId);
+      assert.deepEqual(
+        first.map((stored) => stored.event.type),
+        ["subagent.updated", "thread.created"],
+      );
+      assert.equal(child.title, "Recovered reviewer");
+      assert.equal(child.creationSource, "provider");
+      assert.deepEqual(child.lineage, {
+        parentThreadId: rootEvent.threadId,
+        relationshipToParent: "subagent",
+        rootThreadId: rootEvent.threadId,
+      });
+      assert.deepEqual(child.forkedFrom, { type: "node", nodeId });
+      assert.deepEqual(child.modelSelection, {
+        instanceId: modelSelection.instanceId,
+        model: "gpt-6.1-sol",
+      });
+      assert.deepEqual(
+        (yield* ingest()).map((stored) => stored.event.type),
+        ["subagent.updated"],
+      );
     }),
   );
 

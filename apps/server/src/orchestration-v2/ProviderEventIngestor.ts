@@ -34,6 +34,7 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { makeProviderFailureTurnItem } from "@t3tools/provider-core/server/failure";
+import { makeSubagentChildThread } from "@t3tools/provider-core/server/subagentProjection";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import { stripUnservedToolOutputImageBytes } from "./toolOutputImageBytes.ts";
 import { boundFileChangeForStorage } from "./WireProjection.ts";
@@ -412,11 +413,7 @@ export const layer: Layer.Layer<
     const syncSubagentThreadModel = Effect.fn("ProviderEventIngestor.syncSubagentThreadModel")(
       function* (input: ProviderEventIngestInput, subagent: OrchestrationV2Subagent) {
         const { childThreadId, model } = subagent;
-        if (
-          subagent.origin !== "provider_native" ||
-          childThreadId === null ||
-          (model === null && subagent.modelSelection === undefined)
-        ) {
+        if (subagent.origin !== "provider_native" || childThreadId === null) {
           return [];
         }
         const reportedSelection = ({ modelSelection }: { modelSelection: ModelSelection }) =>
@@ -429,9 +426,9 @@ export const layer: Layer.Layer<
           Effect.map((thread) =>
             modelSelectionsEqual(thread.modelSelection, reportedSelection(thread)) ? null : thread,
           ),
-          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(undefined) }),
         );
-        // Nearly every update already matches; only a mismatch takes the lock.
+        // Only a missing child or a model mismatch takes the thread lock.
         if ((yield* staleThread) === null) return [];
         return yield* threadCommands.withLock(
           childThreadId,
@@ -439,6 +436,30 @@ export const layer: Layer.Layer<
             const thread = yield* staleThread;
             if (thread === null) return [];
             const now = yield* DateTime.now;
+            // Resuming a task after restart can recover its registry entry
+            // before the adapter emits the child conversation's creation.
+            if (thread === undefined) {
+              const parent = yield* projections.getThread(subagent.threadId);
+              const child = makeSubagentChildThread({
+                parentThread: parent,
+                childThreadId,
+                parentNodeId: subagent.id,
+                activeProviderThreadId: subagent.providerThreadId,
+                providerInstanceId: subagent.providerInstanceId,
+                modelSelection: reportedSelection(parent),
+                title: subagent.title ?? "Subagent",
+                now: subagent.startedAt ?? now,
+                createdBy: subagent.createdBy,
+                creationSource: "provider",
+              });
+              const created = yield* makeDomainEvent(input, {
+                type: "thread.created",
+                threadId: childThreadId,
+                payload: child,
+                occurredAt: now,
+              });
+              return yield* eventSink.write({ events: [created] });
+            }
             const event = yield* makeDomainEvent(input, {
               type: "thread.model-selection-updated",
               threadId: thread.id,
