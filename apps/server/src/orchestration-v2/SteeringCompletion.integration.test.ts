@@ -405,9 +405,8 @@ it.effect.each(
   ),
 );
 
-// A changed selection the provider applies on its next turn waits there as the
-// thread's saved selection. That holds for a provider that can restart the
-// turn (Codex) too: restarting it would end the turn's native subagents.
+// A turn-scoped selection waits for the next turn while native steering
+// preserves the active attempt, including providers that also support restart.
 const runSelection = {
   instanceId,
   model: "test-model",
@@ -420,7 +419,7 @@ const composerSelection = {
 
 const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function* (
   name: string,
-  canRestart = false,
+  supportsRestart = false,
 ) {
   const cwd = yield* checkpointWorkspace(name);
   const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
@@ -431,7 +430,7 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     turns: {
       ...CodexProviderCapabilitiesV2.turns,
       supportsActiveSteering: true,
-      supportsSteeringByInterruptRestart: canRestart,
+      supportsSteeringByInterruptRestart: supportsRestart,
     },
   };
   const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
@@ -505,7 +504,17 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
             Effect.sync(() => {
               steered.push(turn.message.text);
             }),
-          interruptTurn: () => Effect.void,
+          interruptTurn: (input) =>
+            Queue.offer(events, {
+              type: "turn.terminal",
+              driver,
+              providerThreadId: input.providerThread.id,
+              providerTurnId: input.providerTurnId,
+              runOrdinal: started.at(-1)!.runOrdinal,
+              status: "interrupted",
+              failure: null,
+              threadDisposition: "reusable",
+            }).pipe(Effect.asVoid),
           respondToRuntimeRequest: () => Effect.void,
           readThreadSnapshot: () => Effect.die("unused"),
           rollbackThread: () => Effect.die("unused"),
@@ -564,19 +573,54 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
   return { events, started, steered, layer, startFirstTurn };
 });
 
-it.effect.each([{ canRestart: false }, { canRestart: true }])(
-  "steers a changed turn-scoped selection into the running turn (canRestart=$canRestart)",
-  ({ canRestart }) =>
+it.effect.each([false, true])(
+  "steers a changed turn-scoped selection without stopping work with restart support=%s",
+  (supportsRestart) =>
     Effect.scoped(
       Effect.gen(function* () {
         const { started, steered, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
-          `steering-selection-change-${canRestart}`,
-          canRestart,
+          `steering-selection-change-${supportsRestart}`,
+          supportsRestart,
         );
         yield* Effect.gen(function* () {
           const orchestrator = yield* Orchestrator.OrchestratorV2;
           const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
           const threadId = yield* startFirstTurn;
+          const first = started[0]!;
+          const sink = yield* EventSink.EventSinkV2;
+          const now = yield* DateTime.now;
+          yield* sink.write({
+            events: ["one", "two"].map((name) => ({
+              id: EventId.make(`subagent:${name}`),
+              type: "subagent.updated" as const,
+              threadId,
+              runId: first.runId,
+              nodeId: NodeId.make(`subagent:${name}`),
+              occurredAt: now,
+              payload: {
+                id: NodeId.make(`subagent:${name}`),
+                threadId,
+                runId: first.runId,
+                parentNodeId: first.rootNodeId,
+                origin: "provider_native" as const,
+                createdBy: "agent" as const,
+                driver,
+                providerInstanceId: instanceId,
+                providerThreadId: first.providerThread.id,
+                childThreadId: null,
+                nativeTaskRef: { driver, nativeId: `child:${name}`, strength: "strong" as const },
+                prompt: "Audit the app.",
+                title: `Auditor ${name}`,
+                model: runSelection.model,
+                completionWake: "settled_only" as const,
+                status: "running" as const,
+                result: null,
+                startedAt: now,
+                completedAt: null,
+                updatedAt: now,
+              },
+            })),
+          });
           const steer = (id: string, selection: ModelSelection) =>
             orchestrator
               .dispatch({
@@ -601,6 +645,8 @@ it.effect.each([{ canRestart: false }, { canRestart: true }])(
           assert.equal(changed.runs[0]?.status, "running");
           assert.deepEqual(changed.runs[0]?.modelSelection, runSelection);
           assert.deepEqual(changed.thread.modelSelection, composerSelection);
+          assert.lengthOf(changed.subagents, 2);
+          assert.isTrue(changed.subagents.every((subagent) => subagent.status === "running"));
 
           // Choosing the running run's selection again replaces the saved choice.
           yield* steer("steer-reverted", runSelection);
@@ -615,7 +661,6 @@ it.effect.each([{ canRestart: false }, { canRestart: true }])(
             instanceId: ProviderInstanceId.make("codex-work"),
             model: "other",
           };
-          const sink = yield* EventSink.EventSinkV2;
           yield* sink.write({
             events: [
               {
