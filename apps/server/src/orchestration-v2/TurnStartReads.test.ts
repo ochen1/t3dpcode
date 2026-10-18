@@ -283,7 +283,7 @@ it.effect.each(["sqlite", "memory"] as const)(
       );
       assert.equal(context.messages.find((m) => m.id === messageId)?.text, "Continue");
       assert.isTrue(context.hasConversation);
-      assert.deepEqual(context.turnItems, []);
+      assert.equal(context.nextTurnItemOrdinal, 1);
       assert.deepEqual(yield* store.getTurnStartHistory(threadId), [item]);
       assert.deepEqual(yield* store.getTurnStartHistory(threadId, [oldRunId]), [item]);
       assert.deepEqual(yield* store.getTurnStartHistory(threadId, [runId]), []);

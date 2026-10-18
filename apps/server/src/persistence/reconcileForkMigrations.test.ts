@@ -79,6 +79,7 @@ describe("fork database upgrade", () => {
         [62, "ThreadFailureLookupIndex"],
         [63, "SelfHostedPushDevices"],
         [64, "RuntimeRecoveryReadIndexes"],
+        [65, "InteractiveProjectionIndexes"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
@@ -104,6 +105,7 @@ describe("fork database upgrade", () => {
         [62, "ThreadFailureLookupIndex"],
         [63, "SelfHostedPushDevices"],
         [64, "RuntimeRecoveryReadIndexes"],
+        [65, "InteractiveProjectionIndexes"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);

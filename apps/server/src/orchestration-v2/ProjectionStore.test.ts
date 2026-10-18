@@ -1,3 +1,6 @@
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -693,7 +696,7 @@ it.effect("memory shell snapshots scope to one project", () =>
   ),
 );
 
-it.effect("runtime recovery uses the reader worker", () =>
+it.effect("interactive projection reads use the reader worker", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -714,8 +717,50 @@ it.effect("runtime recovery uses the reader worker", () =>
           return span;
         },
       });
-      yield* store.getRuntimeRecoveryProjection(threadId).pipe(Effect.withTracer(tracer));
-      assert.deepEqual(connections, ["reader"]);
+      const runId = RunId.make("run:reader-worker:rolled-back");
+      const reads = [
+        store.getRuntimeRecoveryProjection(threadId),
+        store.getTurnStartContext(threadId, runId),
+        store.getThreadRecords(threadId, ["runs", "messages"], { messageRoles: ["user"] }),
+        store.getThreadShell(threadId),
+        store.getShellSnapshot(),
+        store.getLimitRecoveryCandidates({
+          now: yield* DateTime.now,
+          autoResume: true,
+          snooze: false,
+        }),
+      ];
+      yield* Effect.all(reads).pipe(Effect.withTracer(tracer));
+      assert.deepEqual(
+        connections,
+        reads.map(() => "reader"),
+      );
+      const sql = yield* SqlClient.SqlClient;
+      const readerStarted = yield* Deferred.make<void>();
+      const releaseReader = yield* Deferred.make<void>();
+      const reading = yield* sql
+        .withTransaction(
+          store
+            .getThreadRecords(threadId, ["runs"])
+            .pipe(
+              Effect.andThen(Deferred.succeed(readerStarted, undefined)),
+              Effect.andThen(Deferred.await(releaseReader)),
+            ),
+        )
+        .pipe(NodeSqliteClient.readOnly, Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(readerStarted);
+      // A long snapshot must not queue authentication or event commits behind its connection.
+      yield* sql
+        .withTransaction(sql`
+        INSERT INTO self_hosted_push_devices VALUES ('concurrency-proof', 'test-token', 'Test', '2026-10-15')
+      `)
+        .pipe(Effect.ensuring(Deferred.succeed(releaseReader, undefined)));
+      yield* Fiber.join(reading);
+      assert.equal(
+        (yield* sql`SELECT * FROM self_hosted_push_devices WHERE device_id = 'concurrency-proof'`)
+          .length,
+        1,
+      );
     }).pipe(
       Effect.provide(
         ProjectionStore.layer.pipe(
@@ -727,6 +772,107 @@ it.effect("runtime recovery uses the reader worker", () =>
 );
 
 it.layer(layerTest)("ProjectionStoreV2", (it) => {
+  it.effect("interactive reads avoid historical tool payloads and preserve message order", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = yield* addRolledBackRecoveryCandidate("interactive-indexes");
+      const runId = RunId.make("run:interactive-indexes:rolled-back");
+      const now = yield* DateTime.now;
+      const messageIds = [MessageId.make("message:z-first"), MessageId.make("message:a-second")];
+      for (const [index, messageId] of messageIds.entries()) {
+        const message = {
+          id: messageId,
+          threadId,
+          runId,
+          nodeId: null,
+          role: "user" as const,
+          text: "Continue",
+          attachments: [],
+          streaming: false,
+          createdBy: "user" as const,
+          creationSource: "web" as const,
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* store.apply({
+          id: EventId.make(`event:${messageId}`),
+          type: "message.updated",
+          threadId,
+          occurredAt: now,
+          payload: message,
+        });
+        yield* store.apply({
+          id: EventId.make(`event:item:${messageId}`),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`item:${messageId}`),
+            threadId,
+            runId,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: index + 2,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "user_message",
+            messageId,
+            inputIntent: "turn_start",
+            text: message.text,
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          },
+        });
+      }
+      // Neither a status guard nor message ordering may fetch or decode these payloads.
+      yield* sql`
+        WITH RECURSIVE history(n) AS (SELECT 4 UNION ALL SELECT n + 1 FROM history WHERE n < 3000)
+        INSERT INTO orchestration_v2_projection_turn_items
+          (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
+        SELECT 'interactive-history:' || n, ${threadId}, ${runId}, n, 'command_execution', 'completed',
+          '2026-10-15', 'invalid JSON' FROM history
+      `;
+      const { statements, tracer } = traceSqlStatements();
+      const records = yield* store
+        .getThreadRecords(threadId, ["messages", "turnItems"], {
+          turnItemTypes: ["secret_request"],
+        })
+        .pipe(Effect.withTracer(tracer));
+      assert.deepEqual(
+        records.messages.map((message) => message.id),
+        messageIds,
+      );
+      assert.deepEqual(records.turnItems, []);
+      assert.equal((yield* store.getTurnStartContext(threadId, runId)).nextTurnItemOrdinal, 3001);
+      yield* store.getThreadShell(threadId).pipe(Effect.withTracer(tracer));
+      const plansFor = (marker: string) =>
+        Effect.gen(function* () {
+          const query = statements.find((statement) => statement.includes(marker));
+          assert.isDefined(query, marker);
+          return (yield* sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${query}`))
+            .map((row) => row.detail)
+            .join("\n");
+        });
+      const orderPlan = yield* plansFor("AS message_id, MIN(ordinal)");
+      assert.include(orderPlan, "turn_items_message_order_idx");
+      assert.notInclude(orderPlan, "USE TEMP B-TREE FOR GROUP BY");
+      const itemPlan = yield* plansFor("AND type IN (SELECT value FROM json_each");
+      assert.include(itemPlan, "turn_items_thread_type_idx (thread_id=? AND type=?)");
+      const shellPlan = yield* plansFor("AS latest_run_id");
+      assert.include(shellPlan, "turn_items_waiting_secret_idx (thread_id=? AND run_id=?)");
+      assert.include(shellPlan, "runs_executed_idx (thread_id=?)");
+      assert.include(shellPlan, "messages_latest_user_authored_idx (thread_id=?)");
+    }),
+  );
+
   it.effect("recovery reads active items without walking completed history", () =>
     Effect.gen(function* () {
       const store = yield* ProjectionStore.ProjectionStoreV2;
@@ -1076,7 +1222,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       );
       assert.match(
         windowPlan.map((row) => row.detail).join("\n"),
-        /SEARCH item USING INDEX orchestration_v2_projection_turn_items_user_message_idx \(thread_id=\? AND ordinal<\?\)/,
+        /SEARCH item USING INDEX orchestration_v2_projection_turn_items_(?:user_message|thread_type)_idx \(thread_id=\? AND (?:type=\? AND )?ordinal<\?\)/,
       );
       const topLevel = windowPlan.filter((row) => row.parent === 0).map((row) => row.detail);
       assert.include(topLevel, "SEARCH item USING INTEGER PRIMARY KEY (rowid=?)");

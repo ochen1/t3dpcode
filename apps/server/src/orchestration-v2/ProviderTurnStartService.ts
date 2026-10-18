@@ -317,13 +317,7 @@ export const layer: Layer.Layer<
             providerTurnId: null,
             nativeItemRef: null,
             parentItemId: null,
-            ordinal:
-              Math.max(
-                0,
-                ...projection.turnItems
-                  .filter((item) => item.runId === runId)
-                  .map((item) => item.ordinal),
-              ) + 1,
+            ordinal: projection.nextTurnItemOrdinal,
             status,
             startedAt: now,
             completedAt: now,

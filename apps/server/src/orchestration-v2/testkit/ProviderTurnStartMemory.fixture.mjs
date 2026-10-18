@@ -71,7 +71,7 @@ const dependencies = Layer.mergeAll(
     getTurnStartContext: () =>
       Effect.sync(() => {
         fullReads++;
-        return { ...current, hasConversation: true };
+        return { ...current, hasConversation: true, nextTurnItemOrdinal: 1 };
       }),
     getTurnStartHistory: () => Effect.sync(() => current.turnItems),
     getRuntimeRecoveryProjection: () => Effect.sync(() => current),
