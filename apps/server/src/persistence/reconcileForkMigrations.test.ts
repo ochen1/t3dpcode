@@ -11,6 +11,8 @@ import ForkQueue from "./Migrations/056_ProjectionQueuedTurns.ts";
 import ForkClaude from "./Migrations/057_BackfillClaudeProviderThreadIds.ts";
 import ForkCodex from "./Migrations/058_BackfillCodexProviderThreadIds.ts";
 import ForkPush from "./Migrations/059_SelfHostedPushDevices.ts";
+import RecoveryIndexes from "./Migrations/064_RuntimeRecoveryReadIndexes.ts";
+import InteractiveIndexes from "./Migrations/065_InteractiveProjectionIndexes.ts";
 import ViewedFiles from "./Migrations/053_PullRequestFilesViewed.ts";
 
 const seedFork = Effect.gen(function* () {
@@ -77,9 +79,10 @@ describe("fork database upgrade", () => {
         [60, "ThreadSnapshotWindowIndexes"],
         [61, "PullRequestReviewGuides"],
         [62, "ThreadFailureLookupIndex"],
-        [63, "SelfHostedPushDevices"],
+        [63, "DropUnusedV1Projections"],
         [64, "RuntimeRecoveryReadIndexes"],
         [65, "InteractiveProjectionIndexes"],
+        [66, "SelfHostedPushDevices"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
@@ -103,15 +106,50 @@ describe("fork database upgrade", () => {
       assert.deepEqual(yield* runMigrations(), [
         [61, "PullRequestReviewGuides"],
         [62, "ThreadFailureLookupIndex"],
-        [63, "SelfHostedPushDevices"],
+        [63, "DropUnusedV1Projections"],
         [64, "RuntimeRecoveryReadIndexes"],
         [65, "InteractiveProjectionIndexes"],
+        [66, "SelfHostedPushDevices"],
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
       assert.deepEqual(
         yield* sql`SELECT name FROM sqlite_master WHERE name = 'pull_request_review_guides'`,
         [{ name: "pull_request_review_guides" }],
+      );
+      assert.deepEqual(yield* runMigrations(), []);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("upgrades the fork's migrations 63 through 65 and preserves tool history", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 62 });
+      yield* Migrator.make({})({
+        loader: Migrator.fromRecord({
+          "63_SelfHostedPushDevices": ForkPush,
+          "64_RuntimeRecoveryReadIndexes": RecoveryIndexes,
+          "65_InteractiveProjectionIndexes": InteractiveIndexes,
+        }),
+      });
+      yield* sql`INSERT INTO self_hosted_push_devices VALUES ('phone', 'ExponentPushToken[token]', 'Phone', '2026-10-18')`;
+      const history =
+        yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id >= 63 ORDER BY migration_id`;
+      assert.deepEqual(yield* runMigrations(), [
+        [63, "DropUnusedV1Projections"],
+        [64, "RuntimeRecoveryReadIndexes"],
+        [65, "InteractiveProjectionIndexes"],
+        [66, "SelfHostedPushDevices"],
+      ]);
+      assert.deepEqual(
+        yield* sql`SELECT * FROM t3_fork_migration_history ORDER BY migration_id`,
+        history,
+      );
+      assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
+      assert.equal(
+        (yield* sql`SELECT name FROM sqlite_master WHERE name = 'projection_thread_activities'`)
+          .length,
+        1,
       );
       assert.deepEqual(yield* runMigrations(), []);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),

@@ -12,11 +12,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
+import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ControlPill } from "../../components/ui/ControlPill";
+import { Menu } from "../../components/ui/Menu";
 import { ProviderIcon } from "../../components/ProviderIcon";
-import { SymbolView } from "../../components/AppSymbol";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { relativeTime } from "../../lib/time";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useServerConfigs } from "../../state/entities";
@@ -245,7 +246,7 @@ export function ExternalConversationImportRouteScreen() {
         history.
       </Text>
       <View className="flex-row gap-2">
-        <ControlPillMenu
+        <Menu
           actions={environmentActions}
           onPressAction={(event) => {
             const id = event.nativeEvent.event;
@@ -263,8 +264,8 @@ export function ExternalConversationImportRouteScreen() {
             label={environmentLabel}
             variant="pill"
           />
-        </ControlPillMenu>
-        <ControlPillMenu
+        </Menu>
+        <Menu
           actions={projectActions}
           onPressAction={(event) => {
             const id = event.nativeEvent.event;
@@ -279,7 +280,7 @@ export function ExternalConversationImportRouteScreen() {
             label={projectLabel}
             variant="pill"
           />
-        </ControlPillMenu>
+        </Menu>
       </View>
       <View className="h-11 flex-row items-center gap-2.5 rounded-2xl bg-input px-3.5">
         <SymbolView

@@ -24,8 +24,31 @@ export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(func
         readonly migration_id: number;
         readonly name: string;
       }>`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 54`;
+      // Replay the colliding fork tail after upstream's migration 63. Its
+      // indexes and push table are idempotent, so existing data stays in place.
+      if (rows.some((row) => row.migration_id === 63 && row.name === "SelfHostedPushDevices")) {
+        const forkTail = new Map([
+          [63, "SelfHostedPushDevices"],
+          [64, "RuntimeRecoveryReadIndexes"],
+          [65, "InteractiveProjectionIndexes"],
+        ]);
+        if (
+          !rows
+            .filter((row) => row.migration_id >= 63)
+            .every((row) => forkTail.get(row.migration_id) === row.name)
+        ) {
+          return yield* new Migrator.MigrationError({
+            kind: "BadState",
+            message: "Cannot reconcile fork migration IDs with an unrecognized later migration.",
+          });
+        }
+        yield* sql`CREATE TABLE IF NOT EXISTS t3_fork_migration_history (migration_id INTEGER PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL)`;
+        yield* sql`INSERT OR IGNORE INTO t3_fork_migration_history (migration_id, name, created_at) SELECT migration_id, name, created_at FROM effect_sql_migrations WHERE migration_id >= 63`;
+        yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id >= 63`;
+        return;
+      }
       // The V2 fork shipped push devices at 59 and 61, now used by upstream.
-      // Archive those entries so upstream migrations run before push devices at 63.
+      // Archive those entries so upstream migrations run before push devices at 66.
       if (
         rows.some(
           (row) =>
