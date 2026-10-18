@@ -15,6 +15,7 @@ const decodeCursor = Schema.decodeUnknownOption(
     threadId: Schema.optional(Schema.String),
     sessionId: Schema.optional(Schema.String),
     resumeSessionAt: Schema.optional(Schema.String),
+    turnStartMessageIds: Schema.optional(Schema.Array(Schema.NullOr(Schema.String))),
   }),
 );
 
@@ -35,6 +36,11 @@ export function nativeConversationThread(input: {
       ? cursor.value.threadId
       : (cursor.value.resume ?? cursor.value.sessionId);
   if (!nativeId?.trim()) return undefined;
+  // The old runtime kept the initial resume bookmark after subsequent turns.
+  // Its recorded assistant boundaries contain the actual continuation head.
+  const conversationHead =
+    cursor.value.turnStartMessageIds?.findLast((id) => id !== null && id.trim().length > 0) ??
+    cursor.value.resumeSessionAt;
   const driver = ProviderDriverKind.make(input.provider);
   return {
     id: deriveProviderThread({
@@ -49,8 +55,8 @@ export function nativeConversationThread(input: {
     ownerNodeId: null,
     nativeThreadRef: { driver, nativeId, strength: "strong" },
     nativeConversationHeadRef:
-      input.provider === "claudeAgent" && cursor.value.resumeSessionAt
-        ? { driver, nativeId: cursor.value.resumeSessionAt, strength: "strong" }
+      input.provider === "claudeAgent" && conversationHead
+        ? { driver, nativeId: conversationHead, strength: "strong" }
         : null,
     status: "idle",
     firstRunOrdinal: null,

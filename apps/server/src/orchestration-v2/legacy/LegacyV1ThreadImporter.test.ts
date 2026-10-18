@@ -575,3 +575,81 @@ it.effect("keeps fork-imported tools, native continuation, and forkable response
     assert.equal((yield* projections.getThreadProjection(threadId)).turnItems.length, 3);
   }).pipe(Effect.provide(layerTest)),
 );
+
+it.effect("repairs stale imported Claude heads without overwriting later rollback bookmarks", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const sink = yield* EventSink.EventSinkV2;
+    const threadId = ThreadId.make("thread:legacy-claude-head");
+    const at = "2026-09-21T00:00:00.000Z";
+    yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, default_model_selection_json, scripts_json, created_at, updated_at)
+      VALUES ('project:legacy-claude-head', 'Project', '/tmp/project', '{"instanceId":"claudeAgent","model":"claude-sonnet-4-5"}', '[]', ${at}, ${at})`;
+    yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode, created_at, updated_at)
+      VALUES (${threadId}, 'project:legacy-claude-head', 'Conversation', '{"instanceId":"claudeAgent","model":"claude-sonnet-4-5"}', 'full-access', 'default', ${at}, ${at})`;
+    yield* sql`INSERT INTO provider_session_runtime (thread_id, provider_name, provider_instance_id, adapter_key, runtime_mode, status, last_seen_at, resume_cursor_json)
+      VALUES (${threadId}, 'claudeAgent', 'claudeAgent', 'claudeAgent', 'full-access', 'stopped', ${at}, '{"resume":"native-session","resumeSessionAt":"initial-bookmark"}')`;
+    yield* importer.reconcileShells;
+    assert.equal(
+      (yield* projections.getThreadProjection(threadId)).providerThreads[0]
+        ?.nativeConversationHeadRef?.nativeId,
+      "initial-bookmark",
+    );
+    const nativeThread = (yield* projections.getThreadProjection(threadId)).providerThreads[0]!;
+    yield* sql`UPDATE orchestration_v2_legacy_imports SET shell_imported_at = '2026-10-10T00:00:00.000Z' WHERE thread_id = ${threadId}`;
+    const historicalTurn = JSON.stringify({
+      id: "historical:claude-turn",
+      providerThreadId: nativeThread.id,
+      nodeId: "historical:node",
+      runAttemptId: null,
+      nativeTurnRef: null,
+      ordinal: 1,
+      status: "completed",
+      startedAt: at,
+      completedAt: at,
+    });
+    yield* sql`INSERT INTO orchestration_v2_projection_provider_turns (provider_turn_id, thread_id, provider_thread_id, node_id, ordinal, status, started_at, completed_at, payload_json)
+      VALUES ('historical:claude-turn', ${threadId}, ${nativeThread.id}, 'historical:node', 1, 'completed', ${at}, ${at}, ${historicalTurn})`;
+    yield* sql`UPDATE provider_session_runtime SET resume_cursor_json = '{"resume":"native-session","resumeSessionAt":"initial-bookmark","turnStartMessageIds":[null,"first-reply",null,"latest-reply",null]}' WHERE thread_id = ${threadId}`;
+    yield* importer.reconcileShells;
+    const repaired = (yield* projections.getThreadProjection(threadId)).providerThreads[0]!;
+    assert.equal(repaired.nativeThreadRef?.nativeId, "native-session");
+    assert.equal(repaired.nativeConversationHeadRef?.nativeId, "latest-reply");
+    const sequence = yield* (yield* EventStore.EventStoreV2).latestSequence();
+    yield* importer.reconcileShells;
+    assert.equal(yield* (yield* EventStore.EventStoreV2).latestSequence(), sequence);
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("provider-head:deliberate-rollback"),
+          type: "provider-thread.updated",
+          threadId,
+          driver: repaired.driver,
+          providerInstanceId: repaired.providerInstanceId,
+          occurredAt: DateTime.makeUnsafe(at),
+          payload: {
+            ...repaired,
+            nativeConversationHeadRef: {
+              driver: repaired.driver,
+              nativeId: "rollback-bookmark",
+              strength: "strong",
+            },
+          },
+        },
+      ],
+    });
+    yield* importer.reconcileShells;
+    assert.equal(
+      (yield* projections.getThreadProjection(threadId)).providerThreads[0]
+        ?.nativeConversationHeadRef?.nativeId,
+      "rollback-bookmark",
+    );
+    assert.isTrue((yield* (yield* ProjectionMaintenance.ProjectionMaintenanceV2).rebuild).valid);
+    assert.equal(
+      (yield* projections.getThreadProjection(threadId)).providerThreads[0]
+        ?.nativeConversationHeadRef?.nativeId,
+      "rollback-bookmark",
+    );
+  }).pipe(Effect.provide(layerTest)),
+);

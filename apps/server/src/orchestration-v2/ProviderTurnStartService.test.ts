@@ -186,6 +186,7 @@ function makeLocalCommandHarness(input: {
   /** Loads the thread and starts the run, then fails every later state read. */
   readonly failReadsAfterRunning?: boolean;
   readonly nativeForkRef?: "same" | "replaced";
+  readonly legacyImport?: boolean;
 }) {
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
@@ -224,7 +225,7 @@ function makeLocalCommandHarness(input: {
     appThreadId: threadId,
     ownerNodeId: null,
     nativeThreadRef:
-      input.nativeForkRef === undefined
+      input.nativeForkRef === undefined && !input.legacyImport
         ? null
         : {
             driver: ProviderDriverKind.make("codex"),
@@ -233,7 +234,7 @@ function makeLocalCommandHarness(input: {
           },
     nativeConversationHeadRef: null,
     status: "not_loaded",
-    firstRunOrdinal: 2,
+    firstRunOrdinal: input.legacyImport ? null : 2,
     lastRunOrdinal: 2,
     handoffIds: [],
     forkedFrom: null,
@@ -261,6 +262,7 @@ function makeLocalCommandHarness(input: {
       projectId: ProjectId.make("project-native-account-command"),
       branch: input.worktreePath === undefined ? null : "feature/restore",
       worktreePath: input.worktreePath ?? null,
+      historyOrigin: input.legacyImport ? "v1_import" : "native",
     } as OrchestrationV2ThreadProjection["thread"],
     runs: [
       ...(input.previousNativeSession
@@ -1016,6 +1018,19 @@ effectIt.effect.each([
     yield* harness.start;
     expect(harness.startRootRun).toHaveBeenCalledTimes(1);
     expect(harness.startRootRun.mock.calls[0]?.[0].nativeThreadHasTurns).toBe(testCase.hasTurns);
+  }),
+);
+
+effectIt.effect("resumes imported native history before its first V2 provider turn", () =>
+  Effect.gen(function* () {
+    const harness = makeLocalCommandHarness({
+      text: "Continue",
+      failReadsAfterRunning: true,
+      legacyImport: true,
+    });
+    yield* harness.start;
+    expect(harness.startRootRun).toHaveBeenCalledTimes(1);
+    expect(harness.startRootRun.mock.calls[0]?.[0].nativeThreadHasTurns).toBe(true);
   }),
 );
 

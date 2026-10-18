@@ -1248,6 +1248,12 @@ export const layer: Layer.Layer<
         // Legacy accepted attempts have no native id. They count only before
         // a replacement, while no accepted attempt records a native identity.
         nativeThreadHasTurns:
+          // Imported sessions already have provider history before their first
+          // V2 attempt. A replacement native session still starts fresh.
+          (projection.thread.historyOrigin === "v1_import" &&
+            providerThread.firstRunOrdinal === null &&
+            providerThread.nativeThreadRef !== null &&
+            sameNativeThread) ||
           // A native fork contains source turns before it has any accepted
           // local attempts. Keep this fact across provider runtime releases,
           // but only for the copied native id, not a fresh-session fallback.

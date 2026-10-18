@@ -11,6 +11,7 @@ import {
   ModelSelection,
   type OrchestrationV2AppThread,
   OrchestrationV2AppThreadJson,
+  OrchestrationV2ProviderThreadJson,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2TurnItem,
@@ -129,6 +130,12 @@ const decodePullRequests = Schema.decodeUnknownOption(Schema.Array(ThreadPullReq
 const decodeLinkedPullRequest = Schema.decodeUnknownOption(ThreadLinkedPullRequest);
 const decodeStoredThread = Schema.decodeUnknownOption(
   Schema.fromJsonString(OrchestrationV2AppThreadJson),
+);
+const decodeStoredProviderThread = Schema.decodeUnknownOption(
+  Schema.fromJsonString(OrchestrationV2ProviderThreadJson),
+);
+const decodeLegacyResumeHead = Schema.decodeUnknownOption(
+  Schema.Struct({ resumeSessionAt: Schema.String }),
 );
 
 function parseJson(json: string): unknown {
@@ -446,6 +453,72 @@ const make = Effect.gen(function* () {
 
   const reconcileShellsBase = Effect.gen(function* () {
     const now = DateTime.formatIso(yield* DateTime.now);
+    // Repair already imported native bookmarks without overwriting a later
+    // V2 rollback, a replacement native session, or a completed continuation.
+    const providerRepairs = yield* sql<{
+      readonly thread_id: string;
+      readonly provider_payload_json: string;
+      readonly thread_payload_json: string;
+      readonly resume_cursor_json: string;
+    }>`
+      SELECT provider.thread_id, provider.payload_json AS provider_payload_json,
+        thread.payload_json AS thread_payload_json, runtime.resume_cursor_json
+      FROM orchestration_v2_projection_provider_threads AS provider
+      INNER JOIN orchestration_v2_legacy_imports AS legacy_import
+        ON legacy_import.thread_id = provider.thread_id
+      INNER JOIN orchestration_v2_projection_threads AS thread
+        ON thread.thread_id = provider.thread_id
+      INNER JOIN provider_session_runtime AS runtime
+        ON runtime.thread_id = provider.thread_id
+      WHERE runtime.provider_name = 'claudeAgent'
+        AND json_array_length(runtime.resume_cursor_json, '$.turnStartMessageIds') > 0
+        AND json_extract(provider.payload_json, '$.nativeConversationHeadRef.nativeId')
+          = json_extract(runtime.resume_cursor_json, '$.resumeSessionAt')
+        AND NOT EXISTS (
+          SELECT 1 FROM orchestration_v2_projection_provider_turns AS turn
+          WHERE turn.provider_thread_id = provider.provider_thread_id
+            AND turn.status = 'completed'
+            AND turn.completed_at >= legacy_import.shell_imported_at
+        )
+    `;
+    for (const row of providerRepairs) {
+      const provider = decodeStoredProviderThread(row.provider_payload_json);
+      const thread = decodeStoredThread(row.thread_payload_json);
+      const cursor = parseJson(row.resume_cursor_json);
+      const oldHead = decodeLegacyResumeHead(cursor);
+      if (Option.isNone(provider) || Option.isNone(thread) || Option.isNone(oldHead)) continue;
+      const imported = nativeConversationThread({
+        threadId: thread.value.id,
+        provider: "claudeAgent",
+        modelSelection: thread.value.modelSelection,
+        resumeCursor: cursor,
+        createdAt: thread.value.createdAt,
+        updatedAt: thread.value.updatedAt,
+      });
+      if (
+        imported === undefined ||
+        imported.nativeThreadRef?.nativeId !== provider.value.nativeThreadRef?.nativeId ||
+        imported.nativeConversationHeadRef?.nativeId === oldHead.value.resumeSessionAt
+      )
+        continue;
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make(`${IMPORT_EVENT_PREFIX}:provider-head-repair:${yield* randomUuidV4}`),
+            type: "provider-thread.updated",
+            threadId: thread.value.id,
+            driver: provider.value.driver,
+            providerInstanceId: provider.value.providerInstanceId,
+            occurredAt: dateTime(now),
+            payload: {
+              ...provider.value,
+              nativeConversationHeadRef: imported.nativeConversationHeadRef,
+              updatedAt: dateTime(now),
+            },
+          },
+        ],
+      });
+    }
     const repairRows = yield* sql<LegacyRepairRow>`
       SELECT
         thread.thread_id,
