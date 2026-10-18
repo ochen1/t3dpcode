@@ -27,6 +27,7 @@ import {
 import { v2Projection, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { deriveLatestThreadRun, deriveThreadRuntime } from "./threadExecution.ts";
 import { derivePendingThreadRequests } from "./threadRequests.ts";
+import { isThreadWorking } from "./threadInbox.ts";
 
 const environmentId = EnvironmentId.make("environment-v2");
 
@@ -175,6 +176,31 @@ describe("V2 client presentation", () => {
         pendingBackgroundTasks: [],
       }).runtime,
     ).toBeNull();
+  });
+
+  it("keeps migrated conversations ready while preserving their resumable provider connection", () => {
+    const providerThreadId = ProviderThreadId.make("provider-thread-imported");
+    const imported = {
+      ...v2ThreadShell,
+      historyOrigin: "v1_import" as const,
+      latestRunId: null,
+      activeRunId: null,
+      activeProviderThreadId: providerThreadId,
+      status: "idle" as const,
+      pendingBackgroundTasks: [],
+    };
+    const shell = presentThreadShell(environmentId, imported);
+
+    expect(shell.runtime).toBeNull();
+    expect(shell.activeProviderThreadId).toBe(providerThreadId);
+    expect(isThreadWorking(shell)).toBe(false);
+
+    const waiting = presentThreadShell(environmentId, {
+      ...imported,
+      pendingBackgroundTasks: [{ taskId: "child-review", kind: "subagent" }],
+    });
+    expect(waiting.runtime).toMatchObject({ status: "idle" });
+    expect(isThreadWorking(waiting)).toBe(true);
   });
 
   it.each([

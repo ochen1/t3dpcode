@@ -187,6 +187,9 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
     return null;
   }
   const status = parkAtIdle ? "idle" : (thread.activityRunStatus ?? thread.status);
+  // Imported conversations retain a provider connection for resuming, but
+  // idle alone does not mean background work is waiting to wake the agent.
+  if (status === "idle" && !parkAtIdle) return null;
   return {
     status,
     activeRunId: thread.activeRunId,
