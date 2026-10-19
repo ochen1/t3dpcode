@@ -46,6 +46,7 @@ describe("V2 preview upgrade", () => {
         [64, "RuntimeRecoveryReadIndexes"],
         [65, "InteractiveProjectionIndexes"],
         [66, "SelfHostedPushDevices"],
+        [67, "CanonicalizeThreadPullRequestLinks"],
       ]);
       assert.deepStrictEqual(yield* runMigrations(), []);
       assert.deepStrictEqual(yield* sql`SELECT * FROM orchestration_v2_legacy_imports`, imports);
@@ -135,6 +136,7 @@ describe("V2 preview upgrade", () => {
         [64, "RuntimeRecoveryReadIndexes"],
         [65, "InteractiveProjectionIndexes"],
         [66, "SelfHostedPushDevices"],
+        [67, "CanonicalizeThreadPullRequestLinks"],
       ]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
