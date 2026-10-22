@@ -84,6 +84,7 @@ describe("fork database upgrade", () => {
         [65, "InteractiveProjectionIndexes"],
         [66, "SelfHostedPushDevices"],
         [67, "CanonicalizeThreadPullRequestLinks"],
+        ...migrationManifest.filter(([id]) => id > 67),
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
@@ -112,6 +113,7 @@ describe("fork database upgrade", () => {
         [65, "InteractiveProjectionIndexes"],
         [66, "SelfHostedPushDevices"],
         [67, "CanonicalizeThreadPullRequestLinks"],
+        ...migrationManifest.filter(([id]) => id > 67),
       ]);
       assert.deepEqual(yield* sql`SELECT * FROM t3_fork_migration_history`, pushHistory);
       assert.equal((yield* sql`SELECT * FROM self_hosted_push_devices`).length, 1);
@@ -143,6 +145,7 @@ describe("fork database upgrade", () => {
         [65, "InteractiveProjectionIndexes"],
         [66, "SelfHostedPushDevices"],
         [67, "CanonicalizeThreadPullRequestLinks"],
+        ...migrationManifest.filter(([id]) => id > 67),
       ]);
       assert.deepEqual(
         yield* sql`SELECT * FROM t3_fork_migration_history ORDER BY migration_id`,
