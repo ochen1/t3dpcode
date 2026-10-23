@@ -1,3 +1,4 @@
+import * as Statement from "effect/sql/Statement";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -4885,6 +4886,48 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         );
       }
     }),
+  );
+
+  it.effect(
+    "pending-work reads use the sparse index for snapshots, individual threads, and settlement",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* ProjectionStore.ProjectionStoreV2;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = yield* addRolledBackRecoveryCandidate("pending-work-index");
+        const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+        const [snapshot, thread, candidates] = yield* Effect.all([
+          store.getShellSnapshot(),
+          store.getThreadShell(threadId),
+          store.getSettlementCandidates(),
+        ]).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) => {
+            const compiled = statement.compile();
+            if (compiled[0].includes("owning_provider_instance_id")) statements.push(compiled);
+            return Effect.succeed(statement);
+          }),
+        );
+        assert.lengthOf(statements, 3);
+        assert.equal(thread?.id, threadId);
+        assert.deepEqual(
+          snapshot.threads.find((entry) => entry.id === threadId)?.pendingBackgroundTasks,
+          [],
+        );
+        assert.deepEqual(thread?.pendingBackgroundTasks, []);
+        assert.deepEqual(
+          candidates.find((entry) => entry.id === threadId)?.pendingBackgroundTasks,
+          [],
+        );
+        for (const [query, params] of statements) {
+          const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
+          const detail = plan.map((row) => row.detail).join("\n");
+          assert.include(
+            detail,
+            "USING INDEX orchestration_v2_projection_turn_items_shell_pending_idx",
+          );
+          assert.notInclude(detail, "orchestration_v2_projection_turn_items_thread_type_idx");
+        }
+      }),
   );
 
   it.effect("counts imported runless history inherited by fork shells", () =>

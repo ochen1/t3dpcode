@@ -26,6 +26,26 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
+  it.effect("adds snapshot metadata indexes to an existing database at migration 72", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 72 });
+      yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 68`;
+      yield* sql`DROP INDEX IF EXISTS orchestration_v2_projection_provider_turns_window_idx`;
+      yield* sql`DROP INDEX IF EXISTS orchestration_v2_projection_checkpoints_window_idx`;
+
+      yield* runMigrations();
+
+      const indexes = yield* sql<{ name: string }>`SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name IN (
+          'orchestration_v2_projection_provider_turns_window_idx',
+          'orchestration_v2_projection_checkpoints_window_idx'
+        )`;
+      assert.lengthOf(indexes, 2);
+      assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("refuses to start when another migration took a V2 id", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

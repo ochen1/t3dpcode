@@ -1,7 +1,11 @@
 import { assert, it, describe } from "@effect/vitest";
 import {
   EventId,
+  CheckpointId,
+  CheckpointRef,
+  CheckpointScopeId,
   MessageId,
+  NodeId,
   PlanId,
   RunId,
   RuntimeRequestId,
@@ -18,6 +22,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import * as Stream from "effect/Stream";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -653,6 +658,126 @@ describe("V2 thread find", () => {
 });
 
 describe("V2 history materialization", () => {
+  it.effect("reads only the timeline prefix when an older cursor still exists", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      yield* putItems([
+        item("before", 1, "older", "user_message"),
+        item("anchor:a", 2, "anchor"),
+        item("anchor:b", 2, "same ordinal, later identity"),
+        item("newer", 3, "newer payload must not be parsed"),
+      ]);
+      const snapshot = yield* projection.getThreadSnapshot(threadId);
+      const cursor = encodeThreadHistoryCursor({
+        snapshotSequence: snapshot.snapshotSequence,
+        sourceThreadId: threadId,
+        sourceItemId: "anchor:a",
+        position: 1,
+      });
+      const expected = selectHistoryPageFromCursor({
+        items: snapshot.projection.visibleTurnItems,
+        cursor,
+        snapshotSequence: snapshot.snapshotSequence,
+      });
+      const sql = yield* SqlClient.SqlClient;
+      // Allow a malformed fixture, then make JSON reads past the cursor fail (including ordinal ties).
+      yield* sql`DROP INDEX orchestration_v2_projection_turn_items_message_order_idx`;
+      yield* sql`UPDATE orchestration_v2_projection_turn_items SET payload_json = 'invalid json'
+        WHERE turn_item_id IN ('anchor:b', 'newer')`;
+      assert.deepEqual(yield* projection.getThreadHistoryPage(threadId, cursor), {
+        snapshotSequence: snapshot.snapshotSequence,
+        ...expected,
+      });
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("preserves position fallback for missing, foreign, and newly hidden anchors", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const hiddenRun = RunId.make("run:hidden-anchor");
+      yield* commit([run(threadId, hiddenRun, 2, "rolled_back")]);
+      yield* putItems([
+        item("before", 1, "before", "user_message"),
+        { ...item("hidden", 2, "hidden"), runId: hiddenRun },
+        item("after", 3, "after"),
+        item("last", 4, "last"),
+      ]);
+      const snapshot = yield* projection.getThreadSnapshot(threadId);
+      for (const anchor of [
+        { sourceThreadId: threadId, sourceItemId: "missing" },
+        { sourceThreadId: ThreadId.make("other"), sourceItemId: "before" },
+        { sourceThreadId: threadId, sourceItemId: "hidden" },
+      ]) {
+        const cursor = encodeThreadHistoryCursor({
+          snapshotSequence: snapshot.snapshotSequence,
+          ...anchor,
+          position: 2,
+        });
+        assert.deepEqual(yield* projection.getThreadHistoryPage(threadId, cursor), {
+          snapshotSequence: snapshot.snapshotSequence,
+          ...selectHistoryPageFromCursor({
+            items: snapshot.projection.visibleTurnItems,
+            cursor,
+            snapshotSequence: snapshot.snapshotSequence,
+          }),
+        });
+      }
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("keeps superseded interrupts paired with requests beyond the history cursor", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const nodeId = NodeId.make("node:superseded");
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO orchestration_v2_projection_run_attempts
+        (attempt_id, thread_id, run_id, attempt_ordinal, root_node_id, provider,
+         provider_instance_id, provider_thread_id, status, payload_json)
+        VALUES ('attempt:superseded', ${threadId}, ${runId}, 1, ${nodeId}, 'codex',
+          ${providerInstanceId}, 'provider-thread', 'superseded', ${JSON.stringify({
+            id: "attempt:superseded",
+            runId,
+            attemptOrdinal: 1,
+            rootNodeId: nodeId,
+            providerInstanceId,
+            providerThreadId: "provider-thread",
+            providerTurnId: null,
+            reason: "initial",
+            status: "superseded",
+            startedAt: DateTime.formatIso(at(1)),
+            completedAt: DateTime.formatIso(at(2)),
+          })})`;
+      const interrupt = (
+        id: string,
+        ordinal: number,
+        type: "run_interrupt_request" | "run_interrupt_result",
+      ) => ({
+        ...item(id, ordinal, ""),
+        type,
+        nodeId,
+        message: "Stopped",
+      });
+      yield* putItems([
+        item("before", 1, "before", "user_message"),
+        interrupt("result", 2, "run_interrupt_result"),
+        item("anchor", 3, "anchor"),
+        interrupt("request", 4, "run_interrupt_request"),
+      ]);
+      const snapshot = yield* projection.getThreadSnapshot(threadId);
+      const cursor = encodeThreadHistoryCursor({
+        snapshotSequence: snapshot.snapshotSequence,
+        sourceThreadId: threadId,
+        sourceItemId: "anchor",
+        position: 2,
+      });
+      const page = yield* projection.getThreadHistoryPage(threadId, cursor);
+      assert.deepEqual(
+        page.items.map((row) => row.sourceItemId),
+        ["before", "result"],
+      );
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect(
     "combines history pages through a match's message identity without skipping intervening turns",
     () =>
@@ -811,6 +936,119 @@ describe("V2 history materialization", () => {
         cursor = page.nextCursor;
       }
       assert.deepEqual(sizes, [1, 1, 75, 3]);
+    }).pipe(Effect.provide(layerTest)),
+  );
+});
+
+describe("V2 snapshot materialization", () => {
+  it.effect("loads window and active messages and checkpoints through indexed metadata", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const activeRun = RunId.make("run:active");
+      const oldRun = RunId.make("run:old");
+      const selectedNode = NodeId.make("node:window");
+      const otherNode = NodeId.make("node:other");
+      const scopeId = CheckpointScopeId.make("scope:window");
+      yield* commit([run(threadId, activeRun, 2, "running"), run(threadId, oldRun, 3)]);
+      yield* putItems([
+        { ...item("anchor", 1, "recent"), runId: activeRun, nodeId: selectedNode },
+        {
+          ...item("checkpoint-item", 2, ""),
+          type: "checkpoint",
+          nodeId: selectedNode,
+          checkpointId: CheckpointId.make("checkpoint:by-id"),
+          scopeId,
+          files: [],
+        },
+      ]);
+      for (const [id, ownerRun] of [
+        ["anchor", runId],
+        ["active-message", activeRun],
+        ["old-message", oldRun],
+      ] as const) {
+        yield* commit([
+          {
+            id: EventId.make(`message:${id}`),
+            threadId,
+            occurredAt: at(1),
+            type: "message.updated",
+            payload: {
+              id: MessageId.make(id),
+              threadId,
+              runId: ownerRun,
+              nodeId: null,
+              role: "assistant",
+              text: id,
+              attachments: [],
+              streaming: false,
+              createdBy: "agent",
+              creationSource: "provider",
+              createdAt: at(1),
+              updatedAt: at(1),
+            },
+          },
+        ]);
+      }
+      for (const [index, [id, ownerRun, nodeId]] of (
+        [
+          ["by-id", null, otherNode],
+          ["by-run", runId, otherNode],
+          ["by-node", oldRun, selectedNode],
+          ["unrelated", oldRun, otherNode],
+        ] as const
+      ).entries()) {
+        yield* commit([
+          {
+            id: EventId.make(`checkpoint:${id}`),
+            threadId,
+            occurredAt: at(1),
+            type: "checkpoint.captured",
+            payload: {
+              id: CheckpointId.make(`checkpoint:${id}`),
+              threadId,
+              scopeId,
+              runId: ownerRun,
+              nodeId,
+              parentCheckpointId: null,
+              ordinalWithinScope: index,
+              appRunOrdinal: null,
+              ref: CheckpointRef.make(`refs/t3/checkpoints/${id}`),
+              status: "ready",
+              files: [],
+              capturedAt: at(1),
+            },
+          },
+        ]);
+      }
+      const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+      const snapshot = yield* projection.getThreadSnapshotWindow(threadId, { rowLimit: 2 }).pipe(
+        Effect.provideService(Statement.CurrentTransformer, (statement) => {
+          statements.push(statement.compile());
+          return Effect.succeed(statement);
+        }),
+      );
+      assert.sameMembers(
+        snapshot.projection.messages.map((message) => message.id),
+        ["anchor", "active-message"],
+      );
+      assert.deepEqual(
+        snapshot.projection.checkpoints.map((checkpoint) => checkpoint.id),
+        ["checkpoint:by-id", "checkpoint:by-run", "checkpoint:by-node"],
+      );
+      const sql = yield* SqlClient.SqlClient;
+      const plans = yield* Effect.forEach(statements, ([query, params]) =>
+        sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params),
+      );
+      const details = plans
+        .flat()
+        .map((row) => row.detail)
+        .join("\n");
+      assert.include(details, "COVERING INDEX orchestration_v2_projection_checkpoints_window_idx");
+      assert.include(
+        details,
+        "COVERING INDEX orchestration_v2_projection_provider_turns_window_idx",
+      );
+      assert.include(details, "INDEX orchestration_v2_projection_messages_run_idx (run_id=?)");
     }).pipe(Effect.provide(layerTest)),
   );
 });

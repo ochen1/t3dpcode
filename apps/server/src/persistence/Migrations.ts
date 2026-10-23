@@ -70,6 +70,7 @@ import Migration0062 from "./Migrations/062_ThreadFailureLookupIndex.ts";
 import Migration0063 from "./Migrations/063_DropUnusedV1Projections.ts";
 import Migration0064 from "./Migrations/064_RuntimeRecoveryReadIndexes.ts";
 import Migration0065 from "./Migrations/065_InteractiveProjectionIndexes.ts";
+import SnapshotMetadataMigration from "./Migrations/073_ThreadSnapshotMetadataIndexes.ts";
 import Migration0067 from "./Migrations/064_CanonicalizeThreadPullRequestLinks.ts";
 import Migration0069 from "./Migrations/065_CodexUsageNativeTurnIndex.ts";
 import Migration0070 from "./Migrations/066_RepairClientSettlementTimestamps.ts";
@@ -149,6 +150,7 @@ const migrationEntries = [
   [70, "RepairClientSettlementTimestamps", Migration0070],
   [71, "WebhookDedupe", Migration0071],
   [72, "ShellStopRequestIndex", Migration0072],
+  [73, "ThreadSnapshotMetadataIndexes", SnapshotMetadataMigration],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
