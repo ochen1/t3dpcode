@@ -22,6 +22,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -133,7 +134,7 @@ const layerTest = Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventSink
   ),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provide(McpProviderSessions.layer),
-  Layer.provide(SqlitePersistence.layerMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provide(layerCheckpointStoreTest),
   Layer.provide(layerServerConfig),
   Layer.provide(ServerSettings.layerTest()),
@@ -1713,6 +1714,71 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
 );
 
 it.layer(layerTest)("delegated tasks across a server restart", (it) => {
+  it.effect("finalizes a child without loading unrelated parent history", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:bounded-finalization");
+      const projectId = ProjectId.make("project:bounded-finalization");
+      const runId = RunId.make("run:bounded-finalization");
+      const rootNodeId = NodeId.make("node:bounded-finalization");
+      yield* seedParentWithTerminalTask({
+        threadId,
+        projectId,
+        runId,
+        rootNodeId,
+        taskId: NodeId.make("node:bounded-finalization-seed"),
+        deliveryState: "acknowledged",
+        now,
+      });
+      const child = yield* seedRestartCancelledChild({
+        parentThreadId: threadId,
+        projectId,
+        parentRunId: runId,
+        rootNodeId,
+        name: "bounded-finalization-child",
+        completionWake: "settled_only",
+        continuationPending: false,
+        runStatus: "completed",
+        now,
+      });
+      // Obsolete historical payloads must not affect delivery of this task's result.
+      yield* sql`INSERT INTO orchestration_v2_projection_nodes
+        (node_id, thread_id, run_id, parent_node_id, root_node_id, kind, status, payload_json)
+        VALUES ('obsolete-finalization-node', ${threadId}, 'old-run', NULL,
+          'obsolete-finalization-node', 'tool_call', 'completed', '{}')`;
+      yield* sql`INSERT INTO orchestration_v2_projection_messages
+        (message_id, thread_id, run_id, node_id, role, streaming, created_at, updated_at, payload_json)
+        VALUES ('obsolete-finalization-message', ${threadId}, 'old-run', NULL, 'user', 0,
+          ${DateTime.formatIso(now)}, ${DateTime.formatIso(now)}, '{}')`;
+
+      yield* orchestrator.recoverDelegatedTask(child.childThreadId, child.childRunId).pipe(
+        Effect.ensuring(
+          Effect.gen(function* () {
+            yield* sql`DELETE FROM orchestration_v2_projection_nodes WHERE node_id = 'obsolete-finalization-node'`;
+            yield* sql`DELETE FROM orchestration_v2_projection_messages WHERE message_id = 'obsolete-finalization-message'`;
+          }).pipe(Effect.orDie),
+        ),
+      );
+
+      const recovered = yield* orchestrator.getThreadRecords(threadId, [
+        "subagents",
+        "contextTransfers",
+      ]);
+      assert.equal(
+        recovered.subagents.find((task) => task.id === child.taskId)?.status,
+        "completed",
+      );
+      assert.lengthOf(recovered.contextTransfers, 1);
+      yield* orchestrator.recoverDelegatedTask(child.childThreadId, child.childRunId);
+      assert.lengthOf(
+        (yield* orchestrator.getThreadRecords(threadId, ["contextTransfers"])).contextTransfers,
+        1,
+      );
+    }),
+  );
+
   it.effect("queues a child result without creating a provider history handoff", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;

@@ -1255,6 +1255,10 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           },
         });
       }
+      yield* sql`INSERT INTO orchestration_v2_projection_turn_items
+        (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
+        SELECT 'duplicate-first-message', thread_id, run_id, 100, type, status, updated_at, payload_json
+        FROM orchestration_v2_projection_turn_items WHERE turn_item_id = 'item:message:z-first'`;
       // Neither a status guard nor message ordering may fetch or decode these payloads.
       yield* sql`
         WITH RECURSIVE history(n) AS (SELECT 4 UNION ALL SELECT n + 1 FROM history WHERE n < 3000)
@@ -1284,9 +1288,26 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
             .map((row) => row.detail)
             .join("\n");
         });
-      const orderPlan = yield* plansFor("AS message_id, MIN(ordinal)");
+      const orderPlan = yield* plansFor("AS message_id, ordinal");
       assert.include(orderPlan, "turn_items_message_order_idx");
       assert.notInclude(orderPlan, "USE TEMP B-TREE FOR GROUP BY");
+      const orderingQuery = statements.find((statement) =>
+        statement.includes("AS message_id, ordinal"),
+      )!;
+      const opcodes = yield* sql.unsafe<{ opcode: string; p1: number; p2: number }>(
+        `EXPLAIN ${orderingQuery}`,
+      );
+      const [table] = yield* sql<{ rootpage: number }>`SELECT rootpage FROM sqlite_master
+        WHERE name = 'orchestration_v2_projection_turn_items' AND type = 'table'`;
+      const tableCursors = new Set(
+        opcodes
+          .filter((op) => op.opcode === "OpenRead" && op.p2 === table!.rootpage)
+          .map((op) => op.p1),
+      );
+      assert.isFalse(
+        opcodes.some((op) => op.opcode === "Column" && tableCursors.has(op.p1)),
+        "message ordering must read the expression index, not timeline payload pages",
+      );
       const itemPlan = yield* plansFor("AND type IN (SELECT value FROM json_each");
       assert.include(itemPlan, "turn_items_thread_type_idx (thread_id=? AND type=?)");
       const shellPlan = yield* plansFor("AS latest_run_id");
@@ -1655,6 +1676,11 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       assert.include(
         nodePlan.map((row) => row.detail),
         "SEARCH orchestration_v2_projection_nodes USING INDEX orchestration_v2_projection_nodes_live_idx (thread_id=?)",
+      );
+      assert.isTrue(
+        nodePlan.some(
+          (row) => row.detail.startsWith("SEARCH parent ") && row.detail.includes("node_id=?"),
+        ),
       );
       assert.lengthOf(initial.projection.turnItems, 12 * 102);
       const bounded = buildBoundedThreadProjection({
@@ -2050,7 +2076,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           .map((row) => row.detail)
           .filter((detail) => detail.startsWith("SEARCH "));
         assert.deepEqual(nodeLookups, [
-          "SEARCH node USING INDEX sqlite_autoindex_orchestration_v2_projection_nodes_1 (node_id=?)",
+          "SEARCH node USING INDEX orchestration_v2_projection_nodes_thread_id_idx (thread_id=? AND node_id=?)",
         ]);
         assert.notInclude(
           nodePlan.map((row) => row.detail),

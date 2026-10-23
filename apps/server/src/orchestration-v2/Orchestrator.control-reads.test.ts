@@ -25,6 +25,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as DelegatedTaskQuestionReactor from "./DelegatedTaskQuestionReactor.ts";
@@ -55,6 +56,83 @@ const layerTest = Layer.mergeAll(
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
     { databaseLayer: layerDatabase, runEffectWorker: false },
   ),
+);
+
+it.effect("reads command history once when a message unsnoozes, unsettles, and seeds a title", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:message-read-once");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-read-once"),
+      threadId,
+      projectId: ProjectId.make("project:read-once"),
+      title: "Before",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.settle",
+      commandId: CommandId.make("settle-read-once"),
+      threadId,
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.snooze",
+      commandId: CommandId.make("snooze-read-once"),
+      threadId,
+      snoozedUntil: DateTime.formatIso(DateTime.add(yield* DateTime.now, { hours: 1 })),
+    });
+    let historyReads = 0;
+    const result = yield* orchestrator
+      .dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("dispatch-read-once"),
+        threadId,
+        messageId: MessageId.make("message:read-once"),
+        text: "Continue working",
+        titleSeed: "New title",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      })
+      .pipe(
+        Effect.provideService(Statement.CurrentTransformer, (statement) => {
+          if (
+            /SELECT payload_json\s+FROM orchestration_v2_projection_runs\b/.test(
+              statement.compile()[0],
+            )
+          )
+            historyReads++;
+          return Effect.succeed(statement);
+        }),
+      );
+    assert.equal(historyReads, 1);
+    assert.includeMembers(
+      result.storedEvents.map(({ event }) => event.type),
+      [
+        "thread.unsettled",
+        "thread.unsnoozed",
+        "thread.metadata-updated",
+        "message.updated",
+        "run.created",
+      ],
+    );
+    const stored = yield* projections.getThreadRecords(threadId, ["runs", "messages"]);
+    assert.deepInclude(stored.thread, {
+      title: "New title",
+      snoozedUntil: null,
+      settledOverride: null,
+    });
+    assert.equal(stored.messages[0]?.text, "Continue working");
+    assert.equal(stored.runs[0]?.status, "preparing");
+  }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect("marks a never-visited thread's first completion unread", () =>

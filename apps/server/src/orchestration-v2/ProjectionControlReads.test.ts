@@ -13,6 +13,7 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
+  TurnItemId,
   type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -20,6 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
@@ -193,6 +195,141 @@ const storageCases = (["sqlite", "memory"] as const).map((storage) => ({
       ? ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))
       : ProjectionStore.layerMemory,
 }));
+
+it.effect("discovers owned provider threads without fetching historical node bodies", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    yield* Effect.forEach(fixtureEvents(yield* DateTime.now), (event) => store.apply(event), {
+      discard: true,
+    });
+    const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+    const records = yield* store.getThreadRecords(threadId, ["providerThreads"]).pipe(
+      Effect.provideService(Statement.CurrentTransformer, (statement) => {
+        if (statement.compile()[0].includes("OR owner_node_id IN"))
+          statements.push(statement.compile());
+        return Effect.succeed(statement);
+      }),
+    );
+    assert.deepEqual(
+      records.providerThreads.map((row) => row.id),
+      [providerThreadId],
+    );
+    assert.lengthOf(statements, 1);
+    const [query, params] = statements[0]!;
+    const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
+    assert.isTrue(
+      plan.some((row) =>
+        row.detail.includes("COVERING INDEX orchestration_v2_projection_nodes_thread_id_idx"),
+      ),
+    );
+  }).pipe(
+    Effect.provide(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
+  ),
+);
+
+it.effect.each(storageCases)(
+  "$storage: reads only the selected nodes and their timeline items",
+  ({ storage, storeLayer }) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      yield* Effect.forEach(fixtureEvents(now), (event) => store.apply(event), { discard: true });
+      const node = {
+        id: nodeId,
+        threadId,
+        runId,
+        parentNodeId: null,
+        rootNodeId: nodeId,
+        kind: "user_input_request" as const,
+        status: "waiting" as const,
+        countsForRun: false,
+        providerThreadId,
+        providerTurnId,
+        nativeItemRef: null,
+        runtimeRequestId: requestId,
+        checkpointScopeId: null,
+        startedAt: now,
+        completedAt: null,
+      };
+      yield* store.apply({
+        id: EventId.make("selected-node"),
+        type: "node.updated",
+        threadId,
+        occurredAt: now,
+        payload: node,
+      });
+      yield* store.apply({
+        id: EventId.make("selected-item"),
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          id: TurnItemId.make("selected-item"),
+          threadId,
+          runId,
+          nodeId,
+          providerThreadId,
+          providerTurnId,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "waiting",
+          title: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+          type: "user_input_request",
+          requestId,
+          questions: [],
+        },
+      });
+      const otherId = NodeId.make("node:unrelated-history");
+      yield* store.apply({
+        id: EventId.make("unrelated-node"),
+        type: "node.updated",
+        threadId,
+        occurredAt: now,
+        payload: { ...node, id: otherId },
+      });
+      if (storage === "sqlite") {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE orchestration_v2_projection_nodes SET payload_json = '{}'
+          WHERE node_id = ${otherId}`;
+      }
+      const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+      const selected = yield* store
+        .getThreadRecords(threadId, ["nodes", "turnItems"], {
+          nodeIds: [nodeId],
+          turnItemNodeIds: [nodeId],
+        })
+        .pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) => {
+            if (statement.compile()[0].includes("FROM orchestration_v2_projection_turn_items"))
+              statements.push(statement.compile());
+            return Effect.succeed(statement);
+          }),
+        );
+      assert.deepEqual(
+        selected.nodes.map((row) => row.id),
+        [nodeId],
+      );
+      assert.isNotEmpty(selected.turnItems);
+      assert.isTrue(selected.turnItems.every((row) => row.nodeId === nodeId));
+      if (storage === "sqlite") {
+        const sql = yield* SqlClient.SqlClient;
+        const [query, params] = statements[0]!;
+        const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
+        assert.isTrue(plan.some((row) => row.detail.includes("turn_items_node_ordinal_idx")));
+      }
+      const missing = yield* store.getThreadRecords(threadId, ["nodes", "turnItems"], {
+        nodeIds: [NodeId.make("missing")],
+        turnItemNodeIds: [],
+      });
+      assert.deepEqual(missing.nodes, []);
+      assert.deepEqual(missing.turnItems, []);
+    }).pipe(Effect.provide(Layer.merge(storeLayer, SqlitePersistence.layerMemory))),
+);
 
 it.effect.each(storageCases)(
   "$storage: finds the active root turn without an attempt reverse link",
