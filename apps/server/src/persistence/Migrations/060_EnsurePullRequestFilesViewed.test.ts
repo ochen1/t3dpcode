@@ -22,7 +22,7 @@ it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })))(
         VALUES ('github', 'github.com', 'owner/repo', 1, 'viewer', 'file.ts', 'revision', '2026-09-21')`;
         const rows = yield* sql`SELECT * FROM pull_request_files_viewed`;
         assert.equal(rows.length, 1);
-        assert.deepEqual(yield* runMigrations(), []);
+        assert.deepEqual(yield* runMigrations({ toMigrationInclusive: 59 }), []);
       }),
     );
   },
