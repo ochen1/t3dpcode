@@ -3108,6 +3108,27 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           return yield* new ProjectionStoreThreadNotFoundError({ threadId });
         }
 
+        const turnItemRunIds = filter?.turnItemRunIds?.filter((id): id is RunId => id !== null);
+        const includeRunlessItems = filter?.turnItemRunIds?.includes(null) === true;
+        const turnItemIndex =
+          filter?.turnItemNodeIds !== undefined
+            ? sql`INDEXED BY orchestration_v2_projection_turn_items_node_ordinal_idx`
+            : filter?.turnItemRunId !== undefined ||
+                (turnItemRunIds !== undefined &&
+                  (!includeRunlessItems || turnItemRunIds.length === 0))
+              ? sql`INDEXED BY orchestration_v2_projection_turn_items_thread_run_idx`
+              : filter?.turnItemTypes !== undefined
+                ? sql`INDEXED BY orchestration_v2_projection_turn_items_thread_type_idx`
+                : sql``;
+        // A constant-false OR still prevents SQLite from seeking by run_id.
+        const turnItemRunFilter =
+          turnItemRunIds === undefined
+            ? sql``
+            : turnItemRunIds.length === 0
+              ? sql`AND run_id IS NULL`
+              : includeRunlessItems
+                ? sql`AND (run_id IN (SELECT value FROM json_each(${encodeIdList(turnItemRunIds)})) OR run_id IS NULL)`
+                : sql`AND run_id IN (SELECT value FROM json_each(${encodeIdList(turnItemRunIds)}))`;
         const boundedTurnItemRows =
           (fields !== undefined && !fields.includes("turnItems")) ||
           (window === undefined &&
@@ -3122,13 +3143,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ? yield* sql<PayloadRow>`
                 SELECT payload_json
                 FROM orchestration_v2_projection_turn_items
-                  ${filter?.turnItemNodeIds !== undefined ? sql`INDEXED BY orchestration_v2_projection_turn_items_node_ordinal_idx` : filter?.turnItemTypes === undefined || filter.turnItemRunId !== undefined ? sql`` : sql`INDEXED BY orchestration_v2_projection_turn_items_thread_type_idx`}
+                  ${turnItemIndex}
                 WHERE thread_id = ${threadId}
                   ${filter?.turnItemTypes === undefined ? sql`` : sql`AND type IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemTypes)}))`}
                   ${filter?.turnItemStatuses === undefined ? sql`` : sql`AND status IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemStatuses)}))`}
                   ${filter?.turnItemRunId === undefined ? sql`` : sql`AND run_id = ${filter.turnItemRunId}`}
                   ${filter?.turnItemNodeIds === undefined ? sql`` : sql`AND node_id IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemNodeIds)}))`}
-                  ${filter?.turnItemRunIds === undefined ? sql`` : sql`AND (run_id IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemRunIds.filter((id): id is RunId => id !== null))})) OR (${filter.turnItemRunIds.includes(null) ? 1 : 0} = 1 AND run_id IS NULL))`}
+                  ${turnItemRunFilter}
                 ORDER BY ordinal ASC, turn_item_id ASC
               `
               : yield* sql<PayloadRow>`

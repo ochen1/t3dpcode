@@ -195,6 +195,81 @@ const storageCases = (["sqlite", "memory"] as const).map((storage) => ({
       : ProjectionStore.layerMemory,
 }));
 
+it.effect(
+  "run-filtered timeline reads seek the selected runs instead of historical item types",
+  () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      yield* Effect.forEach(fixtureEvents(now), (event) => store.apply(event), { discard: true });
+      for (const [ordinal, itemRunId] of [runId, null].entries()) {
+        yield* store.apply({
+          id: EventId.make(`run-filter:item:${ordinal}`),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: TurnItemId.make(`run-filter:item:${ordinal}`),
+            threadId,
+            runId: itemRunId,
+            nodeId,
+            providerThreadId,
+            providerTurnId,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal,
+            status: "waiting",
+            title: null,
+            startedAt: now,
+            completedAt: null,
+            updatedAt: now,
+            type: "user_input_request",
+            requestId,
+            questions: [],
+          },
+        });
+      }
+      yield* sql`
+      WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < 1000)
+      INSERT INTO orchestration_v2_projection_turn_items
+        (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
+      SELECT 'run-filter:history:' || n, ${threadId}, 'historical-run', n + 2,
+        'user_input_request', 'completed', '2026-10-23', 'invalid JSON' FROM history
+    `;
+      for (const runIds of [[runId], [null], [runId, null], []]) {
+        const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
+        const result = yield* store
+          .getThreadRecords(threadId, ["turnItems"], {
+            turnItemTypes: ["user_input_request"],
+            turnItemRunIds: runIds,
+          })
+          .pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) => {
+              if (statement.compile()[0].includes("FROM orchestration_v2_projection_turn_items"))
+                statements.push(statement.compile());
+              return Effect.succeed(statement);
+            }),
+          );
+        assert.deepEqual(
+          result.turnItems.map((item) => item.runId),
+          runIds,
+        );
+        if (runIds.length !== 1) continue;
+        assert.lengthOf(statements, 1);
+        const [query, params] = statements[0]!;
+        const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
+        assert.isTrue(
+          plan.some((row) =>
+            row.detail.includes("turn_items_thread_run_idx (thread_id=? AND run_id=?)"),
+          ),
+        );
+      }
+    }).pipe(
+      Effect.provide(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
+    ),
+);
+
 it.effect("discovers owned provider threads without fetching historical node bodies", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
