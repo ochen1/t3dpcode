@@ -15,6 +15,7 @@ import {
   isProviderSendTurnSupportedImageMimeType,
   OrchestrationV2CommandOutputFrame,
   OrchestrationV2GetTurnItemResult,
+  OrchestrationV2ThreadHistoryPage,
 } from "@t3tools/contracts";
 import * as ByteSize from "effect/ByteSize";
 import * as Duration from "effect/Duration";
@@ -45,6 +46,8 @@ const encodeOutputFrame = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2CommandOutputFrame),
 );
 const encodeItem = Schema.encodeEffect(Schema.toCodecJson(OrchestrationV2GetTurnItemResult));
+
+const encodeHistory = Schema.encodeEffect(Schema.toCodecJson(OrchestrationV2ThreadHistoryPage));
 
 const errorResponse = (error: GuestShareAccessError) =>
   HttpServerResponse.json(
@@ -219,6 +222,26 @@ const submitRoute = HttpRouter.add(
   ),
 );
 
+const historyRoute = HttpRouter.add(
+  "GET",
+  `${GUEST_ROUTE_PREFIX}/history`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const cursor = new URLSearchParams(request.url.split("?", 2)[1] ?? "").get("cursor");
+    if (!cursor) return yield* badRequest;
+    const guestShares = yield* GuestShareService;
+    return yield* guestShares.history(yield* sessionToken, cursor).pipe(
+      Effect.flatMap((page) =>
+        encodeHistory(page).pipe(
+          Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })),
+        ),
+      ),
+      Effect.map((body) => HttpServerResponse.jsonUnsafe(body, { headers: NO_STORE })),
+      Effect.catchTags({ GuestShareAccessError: errorResponse }),
+    );
+  }),
+);
+
 const streamRoute = HttpRouter.add(
   "GET",
   `${GUEST_ROUTE_PREFIX}/stream`,
@@ -339,6 +362,7 @@ export const layer = Layer.mergeAll(
   sessionRoute,
   submitRoute,
   streamRoute,
+  historyRoute,
   renderRoute,
   itemRoute,
   commandOutputRoute,

@@ -15,6 +15,7 @@ import {
   type OrchestrationV2CommandOutputFrame,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2GetTurnItemResult,
+  type OrchestrationV2ThreadHistoryPage,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -164,6 +165,10 @@ export class GuestShareService extends Context.Service<
       request: GuestSubmitRequest,
       uploads: ReadonlyArray<GuestUpload>,
     ) => Effect.Effect<void, GuestShareAccessError>;
+    readonly history: (
+      session: string,
+      cursor: string,
+    ) => Effect.Effect<OrchestrationV2ThreadHistoryPage, GuestShareAccessError>;
     readonly stream: (
       session: string,
     ) => Effect.Effect<Stream.Stream<GuestStreamEvent>, GuestShareAccessError>;
@@ -561,6 +566,16 @@ const make = Effect.gen(function* () {
 
   const unavailable = new GuestShareAccessError({ reason: "unavailable" });
 
+  const history = Effect.fn("GuestShareService.history")(function* (
+    session: string,
+    cursor: string,
+  ) {
+    const { thread } = yield* authorize(session, "session");
+    return yield* orchestrator
+      .getThreadHistoryPage(thread.id, cursor)
+      .pipe(Effect.mapError(() => unavailable));
+  });
+
   /** An item of the shared thread, read after the session check. */
   const threadItem = Effect.fn("GuestShareService.threadItem")(function* (
     session: string,
@@ -636,6 +651,7 @@ const make = Effect.gen(function* () {
     check,
     submit,
     stream,
+    history,
     render,
     item,
     commandOutput,

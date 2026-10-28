@@ -9,10 +9,17 @@ import {
   type GuestShareView,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadHistoryPage,
   type OrchestrationV2TurnItem,
   type ThreadGuestMessage,
 } from "@t3tools/contracts";
 import { applyOrchestrationV2ProjectionEvent } from "@t3tools/client-runtime/state/orchestration-v2-projection";
+import {
+  EMPTY_THREAD_HISTORY_META,
+  applyHistoryPageMeta,
+  mergeOlderHistoryIntoProjection,
+  type ThreadHistoryMeta,
+} from "@t3tools/client-runtime/state/thread-history-merge";
 import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -22,6 +29,8 @@ export interface GuestStreamState {
   /** The thread as the owner's client holds it, built with the same reducer. */
   readonly projection: OrchestrationV2ThreadProjection | null;
   readonly sequence: number;
+  readonly history: ThreadHistoryMeta;
+  readonly historyGeneration: number;
   /** Set while the snapshot is a window of a longer history, as the owner's client tracks it. */
   readonly partial: { readonly latestLocalTurnOrdinal: number | null } | null;
   readonly ended: boolean;
@@ -36,6 +45,8 @@ export const initialGuestStreamState: GuestStreamState = {
   view: null,
   projection: null,
   sequence: 0,
+  history: EMPTY_THREAD_HISTORY_META,
+  historyGeneration: 0,
   partial: null,
   ended: false,
   awaitingRowIds: new Set(),
@@ -75,6 +86,14 @@ const decodeGuestStreamEvent = Schema.decodeUnknownOption(
 export const parseGuestStreamEvent = (data: string): GuestStreamEvent | null =>
   Option.getOrNull(decodeGuestStreamEvent(data));
 
+export type GuestStreamAction =
+  | GuestStreamEvent
+  | ({ readonly cursor: string; readonly generation: number } & (
+      | { readonly type: "history-start" }
+      | { readonly type: "history-page"; readonly page: OrchestrationV2ThreadHistoryPage }
+      | { readonly type: "history-error"; readonly error: string }
+    ));
+
 /**
  * Applies the owner's thread stream the way the owner's client does (see
  * EnvironmentThreadState in client-runtime): a snapshot replaces the thread, and later events
@@ -82,8 +101,34 @@ export const parseGuestStreamEvent = (data: string): GuestStreamEvent | null =>
  */
 export function applyGuestStreamEvent(
   state: GuestStreamState,
-  event: GuestStreamEvent,
+  event: GuestStreamAction,
 ): GuestStreamState {
+  if (
+    event.type === "history-start" ||
+    event.type === "history-page" ||
+    event.type === "history-error"
+  ) {
+    if (
+      state.ended ||
+      state.projection === null ||
+      event.cursor !== state.history.historyCursor ||
+      event.generation !== state.historyGeneration
+    )
+      return state;
+    if (event.type === "history-start")
+      return { ...state, history: { ...state.history, loading: true, error: null } };
+    if (event.type === "history-error")
+      return { ...state, history: { ...state.history, loading: false, error: event.error } };
+    return {
+      ...state,
+      projection: mergeOlderHistoryIntoProjection(state.projection, event.page.items),
+      history: applyHistoryPageMeta(state.history, event.page),
+      awaitingRowIds: withoutPlaced(
+        state.awaitingRowIds,
+        event.page.items.map((row) => row.item),
+      ),
+    };
+  }
   switch (event.type) {
     case "view":
       // The page follows the share it names; a view of another one means the link changed.
@@ -103,6 +148,13 @@ export function applyGuestStreamEvent(
           ...state,
           projection,
           sequence: item.snapshotSequence,
+          historyGeneration: state.historyGeneration + 1,
+          history: {
+            ...EMPTY_THREAD_HISTORY_META,
+            historyCursor: item.historyCursor ?? null,
+            hasMoreHistory: item.hasMoreHistory === true,
+            latestLocalTurnOrdinal: item.latestLocalTurnOrdinal ?? null,
+          },
           partial:
             item.hasMoreHistory === true || (item.historyCursor ?? null) !== null
               ? { latestLocalTurnOrdinal: item.latestLocalTurnOrdinal ?? null }

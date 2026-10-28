@@ -5,6 +5,7 @@ import {
   GUEST_ROUTE_PREFIX,
   GUEST_SHARE_PARAM,
   GuestMessageId,
+  OrchestrationV2ThreadHistoryPage,
   type GuestRedeemRequest,
   type GuestShareView,
   type GuestThreadModel,
@@ -47,7 +48,7 @@ import type { ExpandedImagePreview } from "../chat/ExpandedImagePreview";
 import { GuestMessageAttachments } from "../chat/GuestMessageAttachments";
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
 import { GuestMessageName, guestBubbleClassName } from "../chat/guestMessageStyle";
-import { MessagesTimeline } from "../chat/MessagesTimeline";
+import { MessagesTimeline, type MessagesTimelineHistoryControls } from "../chat/MessagesTimeline";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDisplayModelName, getTriggerDisplayModelName } from "../chat/providerIconUtils";
 import { ScrollToEndButton } from "../chat/TimelineOverlays";
@@ -129,6 +130,10 @@ function takeGuestEntry(): GuestEntry {
   }
   return capturedEntry;
 }
+
+const decodeHistoryPage = Schema.decodeUnknownSync(
+  Schema.toCodecJson(OrchestrationV2ThreadHistoryPage),
+);
 
 const decodeErrorBody = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.String }));
 
@@ -258,6 +263,31 @@ function GuestSession({ shareId }: { readonly shareId: string }) {
     return () => source.close();
   }, [shareId]);
 
+  const historyRequest = useRef(false);
+  const loadEarlier = async () => {
+    const cursor = stream.history.historyCursor;
+    if (cursor === null || stream.history.loading || historyRequest.current) return;
+    historyRequest.current = true;
+    const generation = stream.historyGeneration;
+    dispatch({ type: "history-start", cursor, generation });
+    try {
+      const query = new URLSearchParams({ [GUEST_SHARE_PARAM]: shareId, cursor });
+      const response = await fetch(`${GUEST_ROUTE_PREFIX}/history?${query}`);
+      if (!response.ok) throw new Error("Could not load earlier turns. Try again.");
+      const page = decodeHistoryPage(await response.json());
+      dispatch({ type: "history-page", cursor, generation, page });
+    } catch {
+      dispatch({
+        type: "history-error",
+        cursor,
+        generation,
+        error: "Could not load earlier turns. Try again.",
+      });
+    } finally {
+      historyRequest.current = false;
+    }
+  };
+
   if (stream.ended || (rejected && stream.view !== null)) {
     return <Notice title="This link has ended" detail="The owner stopped sharing this thread." />;
   }
@@ -268,6 +298,12 @@ function GuestSession({ shareId }: { readonly shareId: string }) {
         view={stream.view}
         projection={stream.projection}
         awaitingRowIds={stream.awaitingRowIds}
+        historyControls={{
+          ...stream.history,
+          onLoadEarlier: () => {
+            void loadEarlier();
+          },
+        }}
       />
     );
   }
@@ -354,10 +390,12 @@ function GuestThread({
   view: { shareId, title, expiresAt, messages, model },
   projection,
   awaitingRowIds,
+  historyControls,
 }: {
   readonly view: GuestShareView;
   readonly projection: OrchestrationV2ThreadProjection;
   readonly awaitingRowIds: GuestStreamState["awaitingRowIds"];
+  readonly historyControls: MessagesTimelineHistoryControls;
 }) {
   // No ":" so the timeline finds no environment thread behind the key.
   const threadKey = `guest-${shareId}`;
@@ -444,6 +482,7 @@ function GuestThread({
         <MessagesTimeline
           listRef={listRef}
           timelineEntries={entries}
+          historyControls={historyControls}
           isWorking={isWorking}
           activeTurnInProgress={isWorking}
           activeTurnStartedAt={workStartedAt}
@@ -472,7 +511,7 @@ function GuestThread({
           onAnchorSizeChanged={ignore}
           contentInsetEndAdjustment={0}
           emptyPlaceholderInset={0}
-          liveFollowEnabled={follow.timelineLiveFollowEnabled}
+          liveFollowEnabled={follow.timelineLiveFollowEnabled && !historyControls.loading}
           onIsAtEndChange={follow.onIsAtEndChangeStable}
           onViewportAttach={follow.attachTimelineViewport}
           footer={

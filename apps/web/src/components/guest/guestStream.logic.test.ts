@@ -17,6 +17,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
 import {
   applyGuestStreamEvent,
+  type GuestStreamAction,
   formatGuestExpiry,
   guestFilesProblem,
   initialGuestStreamState,
@@ -98,7 +99,7 @@ const itemEvent = (sequence: number, item: OrchestrationV2TurnItem): GuestStream
   },
 });
 
-const apply = (events: ReadonlyArray<GuestStreamEvent>, state = initialGuestStreamState) =>
+const apply = (events: ReadonlyArray<GuestStreamAction>, state = initialGuestStreamState) =>
   events.reduce<GuestStreamState>(applyGuestStreamEvent, state);
 
 const itemIds = (state: GuestStreamState) =>
@@ -219,4 +220,110 @@ describe("guestFilesProblem", () => {
     expect(guestFilesProblem([file("image/svg+xml")])).toMatch(/PNG, JPEG, GIF, or WebP/);
     expect(guestFilesProblem([file("text/plain", 0)])).toMatch(/cannot be attached/);
   });
+});
+
+it("loads older guest history without losing live updates and ignores responses after reconnect", () => {
+  const initial = apply([
+    {
+      type: "thread",
+      item: {
+        kind: "snapshot",
+        snapshotSequence: 1,
+        projection,
+        historyCursor: "older",
+        hasMoreHistory: true,
+      },
+    },
+  ]);
+  expect(initial.history.hasMoreHistory).toBe(true);
+  const loading = apply(
+    [{ type: "history-start", cursor: "older", generation: initial.historyGeneration }],
+    initial,
+  );
+  const live = apply([itemEvent(2, reply("live", "New reply"))], loading);
+  const older = apply([snapshot(), itemEvent(2, reply("old", "Old reply"))]);
+  const response: GuestStreamAction = {
+    type: "history-page",
+    cursor: "older",
+    generation: initial.historyGeneration,
+    page: {
+      snapshotSequence: 1,
+      items: older.projection!.visibleTurnItems,
+      nextCursor: null,
+      hasMoreHistory: false,
+    },
+  };
+  const loaded = apply([response], live);
+  expect(itemIds(loaded)).toEqual(["old", "live"]);
+  expect(loaded.history.loading).toBe(false);
+  expect(loaded.history.hasMoreHistory).toBe(false);
+  const reconnected = apply(
+    [
+      {
+        type: "thread",
+        item: {
+          kind: "snapshot",
+          snapshotSequence: 2,
+          projection,
+          historyCursor: "older",
+          hasMoreHistory: true,
+        },
+      },
+    ],
+    live,
+  );
+  expect(apply([response], reconnected)).toBe(reconnected);
+});
+
+it("retries a failed history page and advances to the next cursor", () => {
+  const initial = apply([
+    {
+      type: "thread",
+      item: {
+        kind: "snapshot",
+        snapshotSequence: 1,
+        projection,
+        historyCursor: "older",
+        hasMoreHistory: true,
+      },
+    },
+  ]);
+  const request = { cursor: "older", generation: initial.historyGeneration };
+  const failed = apply(
+    [
+      { type: "history-start", ...request },
+      { type: "history-error", ...request, error: "Offline" },
+    ],
+    initial,
+  );
+  expect(failed.history).toMatchObject({
+    loading: false,
+    error: "Offline",
+    historyCursor: "older",
+    hasMoreHistory: true,
+  });
+  const retrying = apply([{ type: "history-start", ...request }], failed);
+  expect(retrying.history).toMatchObject({ loading: true, error: null });
+  const loaded = apply(
+    [
+      {
+        type: "history-page",
+        ...request,
+        page: {
+          snapshotSequence: 1,
+          items: [],
+          nextCursor: "oldest",
+          hasMoreHistory: true,
+        },
+      },
+    ],
+    retrying,
+  );
+  expect(loaded.history).toMatchObject({
+    loading: false,
+    error: null,
+    historyCursor: "oldest",
+    hasMoreHistory: true,
+  });
+  expect(apply([{ type: "history-error", ...request, error: "Late error" }], loaded)).toBe(loaded);
 });

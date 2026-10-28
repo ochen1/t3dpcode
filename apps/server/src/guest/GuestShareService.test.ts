@@ -842,3 +842,75 @@ it.effect("serves the shared thread's files to its guest, never another thread's
     assert.isDefined(shareId);
   }).pipe(Effect.scoped, Effect.provide(layerTest)),
 );
+
+it.effect("loads older shared turns and rejects access after the share closes", () =>
+  Effect.gen(function* () {
+    const { orchestrator, guestShares, credential } = yield* shareThread;
+    const { token } = yield* guestShares.redeem({ credential, name: "Sam" });
+    const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    for (let index = 0; index < 15; index++) {
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make(`history-event-${index}`),
+            type: "turn-item.updated",
+            threadId,
+            driver: ProviderDriverKind.make("codex"),
+            providerInstanceId: instanceId,
+            occurredAt: now,
+            payload: {
+              id: TurnItemId.make(`history-item-${index}`),
+              threadId,
+              runId: null,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: index,
+              status: "completed",
+              title: null,
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              type: "user_message",
+              messageId: MessageId.make(`history-message-${index}`),
+              inputIntent: "turn_start",
+              text: `Earlier message ${index}`,
+              attachments: [],
+              createdBy: "user",
+              creationSource: "web",
+            },
+          },
+        ],
+      });
+    }
+    const opening = Array.from(
+      yield* Stream.runCollect(Stream.take(yield* guestShares.stream(token), 2)),
+    );
+    const snapshot = opening[1];
+    if (
+      snapshot?.type !== "thread" ||
+      snapshot.item.kind !== "snapshot" ||
+      !snapshot.item.historyCursor
+    ) {
+      return assert.fail("Expected a bounded snapshot with earlier history");
+    }
+    const cursor = snapshot.item.historyCursor;
+    const page = yield* guestShares.history(token, cursor);
+    assert.isTrue(
+      page.items.some(
+        (row) => row.item.type === "user_message" && row.item.text === "Earlier message 0",
+      ),
+    );
+    assert.isFalse(page.hasMoreHistory);
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.history("invalid", cursor))));
+    yield* orchestrator.dispatch({
+      type: "thread.guest-share.close",
+      commandId: CommandId.make("close-history"),
+      threadId,
+    });
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(guestShares.history(token, cursor))));
+  }).pipe(Effect.provide(layerTest)),
+);
