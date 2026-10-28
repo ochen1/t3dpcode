@@ -1,11 +1,12 @@
 import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
-import * as Drizzle from "alchemy/Drizzle/Postgres";
+import * as Cloudflare from "@alchemy.run/cloudflare";
+import * as Drizzle from "@alchemy.run/drizzle/Postgres";
 import * as Config from "effect/Config";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -67,6 +68,7 @@ import * as HookForwarder from "./hooks/HookForwarder.ts";
 import * as HeldHooks from "./hooks/HeldHooks.ts";
 import * as HookInbox from "./hooks/HookInbox.ts";
 import * as HookInboxObject from "./hooks/HookInboxObject.ts";
+import * as MobileTelemetry from "./mobileTelemetry/MobileTelemetry.ts";
 
 const layerWebcrypto = Layer.succeed(
   Crypto.Crypto,
@@ -167,8 +169,8 @@ export const layer = Api.make(
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
     // Named statements collide behind Hyperdrive transaction pooling (Effect-TS/effect#8320); use unnamed statements.
-    const db = yield* Drizzle.Postgres(hyperdrive.connectionString, undefined, {
-      prepare: false,
+    const db = yield* Drizzle.Postgres(hyperdrive.connectionString, {
+      client: { prepare: false },
     });
 
     const managedEndpointTunnelBinding = yield* Cloudflare.Tunnel.ReadWriteTunnel();
@@ -198,7 +200,6 @@ export const layer = Api.make(
       },
     });
     const hookInboxes = yield* HookInboxObject.HookInboxObject;
-
     const alchemyRuntimeContext: Alchemy.BaseRuntimeContext = yield* Cloudflare.Worker;
 
     const loadSettings = Effect.gen(function* () {
@@ -322,18 +323,19 @@ export const layer = Api.make(
       Layer.provideMerge(layerWebcrypto),
     );
 
-    // Fails open: a limiter outage must not drop webhooks the environment would accept.
+    // Fails open: a limiter outage must not drop webhooks or app telemetry.
     const allowWith =
-      (limiter: typeof hookRateLimit) =>
+      (
+        limiter: typeof hookRateLimit,
+        failedOpenAttribute = "relay.hook.rate_limiter_failed_open",
+      ) =>
       (key: string): Effect.Effect<boolean> =>
         limiter.limit({ key }).pipe(
           Effect.map((result) => result.success),
           Effect.provideService(Alchemy.RuntimeContext, alchemyRuntimeContext),
           Effect.catch((error) =>
-            Effect.logWarning("Hook rate limiter unavailable", { error: error.message }).pipe(
-              Effect.andThen(
-                Effect.annotateCurrentSpan({ "relay.hook.rate_limiter_failed_open": true }),
-              ),
+            Effect.logWarning("Rate limiter unavailable", { error: error.message }).pipe(
+              Effect.andThen(Effect.annotateCurrentSpan({ [failedOpenAttribute]: true })),
               Effect.as(true),
             ),
           ),
@@ -343,12 +345,19 @@ export const layer = Api.make(
       allowEndpoint: allowWith(hookEndpointRateLimit),
     });
 
-    const layerApp = Layer.merge(
+    const layerMobileTelemetry = Layer.succeed(MobileTelemetry.MobileTelemetry, {
+      handle: Effect.fn("MobileTelemetry.handle")(() =>
+        Effect.succeed(HttpServerResponse.empty({ status: 204 })),
+      ),
+    });
+
+    const layerApp = Layer.mergeAll(
       layerRelayApi,
       HookForwarder.layerApi.pipe(
         Layer.provide(HookForwarder.layer),
         Layer.provide(layerHookRateLimiter),
       ),
+      MobileTelemetry.layerApi.pipe(Layer.provide(layerMobileTelemetry)),
     ).pipe(
       Layer.provideMerge(RelayHttpApi.layerClientAuth),
       Layer.provideMerge(RelayHttpApi.layerDpopClientAuth),
@@ -407,6 +416,11 @@ export const layer = Api.make(
                     updatedBefore: DateTime.formatIso(DateTime.subtract(now, { minutes: 30 })),
                   }),
                 ),
+              ),
+            ),
+            Effect.andThen(
+              DeliveryAttempts.DeliveryAttempts.pipe(
+                Effect.flatMap((attempts) => attempts.pruneExpired),
               ),
             ),
             Effect.catchCause((cause) =>
@@ -478,6 +492,7 @@ export const layer = Api.make(
         Layer.provideMerge(Cloudflare.Tunnel.ReadWriteTunnelBinding),
         Layer.provideMerge(Cloudflare.DNS.ReadWriteDnsHttp),
         Layer.provideMerge(Cloudflare.Workers.RateLimitBinding),
+        Layer.provideMerge(Cloudflare.R2.ReadBucketBinding),
         Layer.provideMerge(HookInboxObject.layer),
         // Disable the duplicate runtime span; ours applies route/header/token redaction and rejects sender traceparent.
         Layer.provideMerge(

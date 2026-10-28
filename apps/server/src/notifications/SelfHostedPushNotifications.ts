@@ -141,7 +141,6 @@ export const make = Effect.gen(function* () {
       : Option.none();
     const state = resolveAgentAwarenessRelayPublishSnapshot({
       environmentId: yield* environment.getEnvironmentId,
-      threadId,
       thread,
       project,
     }).state;

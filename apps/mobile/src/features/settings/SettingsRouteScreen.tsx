@@ -74,7 +74,7 @@ export function SettingsListScreen(props: {
   const workspace = useWorkspaceTabs();
   const inSidebar = props.sidebar;
   const selected = props.selected;
-  const sidebar = useMemo(() => (inSidebar ? { selected } : null), [inSidebar, selected]);
+  const sidebar = inSidebar ? { selected } : null;
   const content = hasCloudPublicConfig() ? (
     <ConfiguredSettingsRouteScreen />
   ) : (

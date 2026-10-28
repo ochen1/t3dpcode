@@ -1,5 +1,5 @@
 import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ProviderRuntimeTurnStatus, TurnTokenUsage } from "@t3tools/contracts";
+import type { RuntimeTurnState, TurnTokenUsage } from "@t3tools/contracts";
 
 /** Adds the native turns Claude runs to answer steering within one T3 turn. */
 export function addClaudeTurnTokenUsage(
@@ -99,7 +99,7 @@ function withEarlierSegmentUsage(
 export function normalizeClaudeTurnTokenUsage(
   result: { readonly subtype: SDKResultMessage["subtype"]; readonly usage?: unknown } | undefined,
   hasSubagents: boolean,
-  terminalStatus: ProviderRuntimeTurnStatus,
+  terminalStatus: RuntimeTurnState,
   earlierSegmentUsage: ReadonlyArray<unknown> = [],
 ): TurnTokenUsage {
   const finalUsage = result?.usage as Record<string, unknown> | undefined;

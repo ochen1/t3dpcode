@@ -79,6 +79,10 @@ import Migration0071 from "./Migrations/067_WebhookDedupe.ts";
 import Migration0072 from "./Migrations/068_ShellStopRequestIndex.ts";
 import MessageSearchMigration from "./Migrations/069_ThreadMessageSearch.ts";
 
+import PeerLinksMigration from "./Migrations/070_PeerLinks.ts";
+import PeerLinkFenceMigration from "./Migrations/071_PeerLinkFence.ts";
+import WaitingLinkRequestIndexMigration from "./Migrations/072_WaitingLinkRequestIndex.ts";
+
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -155,6 +159,9 @@ const migrationEntries = [
   [73, "ThreadSnapshotMetadataIndexes", SnapshotMetadataMigration],
   [74, "ProviderThreadOwnershipIndex", ProviderThreadOwnershipMigration],
   [75, "ThreadMessageSearch", MessageSearchMigration],
+  [76, "PeerLinks", PeerLinksMigration],
+  [77, "PeerLinkFence", PeerLinkFenceMigration],
+  [78, "WaitingLinkRequestIndex", WaitingLinkRequestIndexMigration],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
