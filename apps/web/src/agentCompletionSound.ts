@@ -68,13 +68,6 @@ function getAudioContext(): AudioContext | null {
   return sharedAudioContext;
 }
 
-export function primeAgentCompletionSound(): void {
-  const context = getAudioContext();
-  if (context?.state === "suspended") {
-    void context.resume().catch(() => undefined);
-  }
-}
-
 export function playAgentCompletionSound(): void {
   const context = getAudioContext();
   if (context === null || context.state === "closed") {

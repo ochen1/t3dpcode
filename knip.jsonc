@@ -135,6 +135,11 @@
     "infra/relay": {
       // Alchemy loads src/worker.ts as the Worker entry and reads its default export.
       "entry": ["alchemy.run.ts!", "src/persistence/schema.ts!", "src/worker.ts!"],
+      // Retained upstream monitors are unused while this fork disables relay telemetry.
+      "ignoreIssues": {
+        "src/monitoring.ts": ["files"],
+        "src/mobileTelemetry/monitoring.ts": ["files"],
+      },
     },
     "packages/*": {
       // These workspace packages are private to this monorepo.

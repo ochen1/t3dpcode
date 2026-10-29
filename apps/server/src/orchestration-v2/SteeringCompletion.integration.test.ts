@@ -448,19 +448,21 @@ const composerSelection = {
 
 const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function* (
   name: string,
-  supportsRestart = false,
+  canRestart = false,
+  canSteer = true,
   interruptImmediately = true,
 ) {
   const cwd = yield* checkpointWorkspace(name);
   const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
   const started: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
   const steered: string[] = [];
+  const interrupted: ProviderTurnId[] = [];
   const capabilities = {
     ...CodexProviderCapabilitiesV2,
     turns: {
       ...CodexProviderCapabilitiesV2.turns,
-      supportsActiveSteering: true,
-      supportsSteeringByInterruptRestart: supportsRestart,
+      supportsActiveSteering: canSteer,
+      supportsSteeringByInterruptRestart: canRestart,
     },
   };
   const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
@@ -537,8 +539,10 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
               steered.push(turn.message.text);
             }),
           interruptTurn: (input) =>
-            interruptImmediately
-              ? Queue.offer(events, {
+            Effect.gen(function* () {
+              interrupted.push(input.providerTurnId);
+              if (interruptImmediately) {
+                yield* Queue.offer(events, {
                   type: "turn.terminal",
                   driver,
                   providerThreadId: input.providerThread.id,
@@ -547,8 +551,9 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
                   status: "interrupted",
                   failure: null,
                   threadDisposition: "reusable",
-                }).pipe(Effect.asVoid)
-              : Effect.void,
+                });
+              }
+            }),
           respondToRuntimeRequest: () => Effect.void,
           readThreadSnapshot: () => Effect.die("unused"),
           rollbackThread: () => Effect.die("unused"),
@@ -603,7 +608,7 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     yield* Fiber.join(running);
     return threadId;
   });
-  return { cwd, events, started, steered, layer, startFirstTurn };
+  return { cwd, events, started, steered, interrupted, layer, startFirstTurn };
 });
 
 it.effect("sends a selected held message once and preserves the remaining queue order", () =>
@@ -989,6 +994,82 @@ it.effect("starts a steer that missed the turn on the saved next-turn selection"
   ),
 );
 
+// regression: #26695 cancelling a Copilot prompt to steer it kills its background agents
+it.effect("queues a steer until the turn ends when the provider cannot steer it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { events, started, steered, interrupted, layer, startFirstTurn } =
+        yield* nextTurnSelectionHarness("steering-unsupported", false, false);
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threadId = yield* startFirstTurn;
+        const first = started[0]!;
+        const messageId = MessageId.make("message:steer");
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("steer"),
+          threadId,
+          messageId,
+          text: "follow up",
+          attachments: [],
+          modelSelection: runSelection,
+          dispatchMode: { type: "start_immediately" },
+          deliveryIntent: "steer",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        yield* worker.drain();
+
+        const held = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(steered, []);
+        assert.deepEqual(interrupted, []);
+        assert.equal(started.length, 1);
+        assert.equal(held.runs.find((run) => run.id === first.runId)?.status, "running");
+        const queued = held.runs.find((run) => run.userMessageId === messageId);
+        assert.equal(queued?.status, "queued");
+
+        const settled = yield* orchestrator.streamDomainEvents.pipe(
+          Stream.filter(
+            (event) =>
+              event.type === "run.updated" &&
+              event.payload.id === first.runId &&
+              event.payload.status === "waiting",
+          ),
+          Stream.take(1),
+          Stream.runDrain,
+          Effect.forkScoped,
+        );
+        const turn = held.providerTurns[0]!;
+        yield* Queue.offer(events, {
+          type: "provider_turn.updated",
+          driver,
+          providerTurn: { ...turn, status: "completed", completedAt: yield* DateTime.now },
+        });
+        yield* Queue.offer(events, {
+          type: "turn.terminal",
+          driver,
+          providerThreadId: turn.providerThreadId,
+          providerTurnId: turn.id,
+          runOrdinal: first.runOrdinal,
+          status: "completed",
+          failure: null,
+          threadDisposition: "reusable",
+        });
+        yield* Fiber.join(settled);
+        yield* worker.drain();
+        yield* orchestrator.resumeQueuedRuns;
+        yield* worker.drain();
+
+        assert.deepEqual(interrupted, []);
+        assert.equal(started.length, 2);
+        assert.equal(started[1]?.runId, queued?.id);
+        assert.equal(started[1]?.message.text, "follow up");
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);
+
 // Codex flushes held drafts after the final answer; reserve their pre-steer position before turn end.
 it.effect("keeps a held commentary draft before the steer when turn end flushes it", () =>
   Effect.scoped(
@@ -1164,6 +1245,7 @@ it.effect("queues a plain send behind the stopped queue and releases its hold", 
       const { started, steered, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
         "plain-send-after-stop",
         false,
+        true,
         false,
       );
       yield* Effect.gen(function* () {

@@ -846,7 +846,7 @@ export const SelfHostedPushDeviceRegistrationResult = Schema.Struct({
   registered: Schema.Boolean,
 });
 
-export class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifications")
+class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifications")
   .add(
     HttpApiEndpoint.post("registerDevice", "/api/notifications/device", {
       headers: OptionalBearerHeaders,

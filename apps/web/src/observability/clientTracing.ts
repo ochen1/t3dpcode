@@ -6,6 +6,3 @@ export function configureClientTracing(config: ClientTracingConfig = {}): Promis
   void config;
   return Promise.resolve();
 }
-export async function __resetClientTracingForTests() {
-  return;
-}

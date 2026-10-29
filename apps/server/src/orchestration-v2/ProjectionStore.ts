@@ -6152,7 +6152,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               worktreePath === undefined
                 ? sql``
                 : sql` AND json_extract(t.payload_json, '$.worktreePath') = ${worktreePath}`
-            }${threadIds === undefined ? sql`` : sql` AND t.thread_id IN ${sql.in(threadIds)}`}
+            }${threadIds === undefined ? sql`` : sql` AND t.thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))`}
             ORDER BY t.updated_at ASC, t.thread_id ASC
           `;
 
@@ -6165,14 +6165,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         : sql<ShellRunRow>`
             SELECT thread_id, run_id, ordinal
             FROM orchestration_v2_projection_runs
-            WHERE thread_id IN ${sql.in(threadIds)}
+            WHERE thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))
           `;
 
     const selectShellRunItemCounts = (threadIds: ReadonlyArray<ThreadId>) =>
       sql<ShellRunItemCountRow>`
         SELECT thread_id, run_id, COUNT(*) AS item_count
         FROM orchestration_v2_projection_turn_items
-        WHERE run_id IS NOT NULL AND thread_id IN ${sql.in(threadIds)}
+        WHERE run_id IS NOT NULL AND thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))
         GROUP BY thread_id, run_id
       `;
 
@@ -6187,7 +6187,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         FROM (
           SELECT thread_id, run_id, COUNT(*) AS item_count
           FROM orchestration_v2_projection_turn_items
-          WHERE thread_id IN ${sql.in(threadIds)}
+          WHERE thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))
           GROUP BY thread_id, run_id
         ) counts
         LEFT JOIN orchestration_v2_projection_runs r ON r.run_id = counts.run_id
@@ -6204,24 +6204,24 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         : sql<PayloadRow & { readonly thread_id: string }>`
             SELECT thread_id, payload_json
             FROM orchestration_v2_projection_provider_threads
-            WHERE thread_id IN ${sql.in(threadIds)}
+            WHERE thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))
           `;
 
     const selectShellPendingTurnItemRows = (
       threadIds?: ReadonlyArray<ThreadId>,
       activeRunIds: ReadonlyArray<string> = [],
     ) => sql<ShellPendingTurnItemRow>`
-            SELECT i.thread_id, i.payload_json, p.provider_instance_id AS owning_provider_instance_id
-            FROM orchestration_v2_projection_turn_items i
-              INDEXED BY orchestration_v2_projection_turn_items_shell_pending_idx
-            LEFT JOIN orchestration_v2_projection_provider_threads p
-              ON p.provider_thread_id = i.provider_thread_id
-            LEFT JOIN orchestration_v2_projection_runs r
-              ON r.run_id = i.run_id
-            WHERE i.type IN ('command_execution', 'dynamic_tool', 'subagent')
-              AND i.status NOT IN ('completed', 'interrupted', 'failed', 'cancelled')
-              AND (i.run_id IS NULL OR r.status <> 'rolled_back')
-        ${threadIds === undefined ? sql`` : sql`AND i.thread_id IN ${sql.in(threadIds)}`}
+      SELECT i.thread_id, i.payload_json, p.provider_instance_id AS owning_provider_instance_id
+      FROM orchestration_v2_projection_turn_items i
+        INDEXED BY orchestration_v2_projection_turn_items_shell_pending_idx
+      LEFT JOIN orchestration_v2_projection_provider_threads p
+        ON p.provider_thread_id = i.provider_thread_id
+      LEFT JOIN orchestration_v2_projection_runs r
+        ON r.run_id = i.run_id
+      WHERE i.type IN ('command_execution', 'dynamic_tool', 'subagent')
+        AND i.status NOT IN ('completed', 'interrupted', 'failed', 'cancelled')
+        AND (i.run_id IS NULL OR r.status <> 'rolled_back')
+        ${threadIds === undefined ? sql`` : sql`AND i.thread_id IN (SELECT value FROM json_each(${encodeIdList(threadIds)}))`}
       ${
         activeRunIds.length === 0
           ? sql``
@@ -6230,7 +6230,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         UNION ALL
         SELECT i.thread_id, i.payload_json, NULL AS owning_provider_instance_id
         FROM orchestration_v2_projection_turn_items i
-        WHERE i.run_id IN ${sql.in(activeRunIds)}
+        WHERE i.run_id IN (SELECT value FROM json_each(${encodeIdList(activeRunIds)}))
           AND i.type IN ('file_change', 'file_search', 'web_search', 'compaction')
           AND i.status IN ('running', 'waiting')
           `
