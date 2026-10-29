@@ -238,6 +238,51 @@ it.effect("lets the writer commit while a read-only transaction is open", () =>
   ),
 );
 
+it.effect.each(["statement", "transaction", "reservation"] as const)(
+  "serves another reader while a read transaction retains its snapshot ($0)",
+  (kind) =>
+    withReaderClient((sql) =>
+      Effect.gen(function* () {
+        const snapshotTaken = yield* Deferred.make<void>();
+        const concurrentRead = yield* Effect.forkChild(
+          Deferred.await(snapshotTaken).pipe(
+            Effect.andThen(sql`INSERT INTO entries VALUES ('second')`),
+            Effect.andThen(
+              (kind === "statement"
+                ? countEntries(sql)
+                : kind === "transaction"
+                  ? sql.withTransaction(countEntries(sql))
+                  : Effect.scoped(
+                      Effect.gen(function* () {
+                        const connection = yield* sql.reserve;
+                        const rows = yield* connection.executeValues(
+                          "SELECT COUNT(*) FROM entries",
+                          [],
+                        );
+                        return rows[0]?.[0];
+                      }),
+                    )
+              ).pipe(SqliteClient.readOnly),
+            ),
+          ),
+        );
+        const counts = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const before = yield* countEntries(sql);
+              yield* Deferred.succeed(snapshotTaken, undefined);
+              const concurrent = yield* Fiber.join(concurrentRead);
+              const after = yield* countEntries(sql);
+              return { before, concurrent, after };
+            }),
+          )
+          .pipe(SqliteClient.readOnly);
+
+        assert.deepEqual(counts, { before: 1, concurrent: 2, after: 1 });
+      }),
+    ),
+);
+
 // regression: #19226 read-only transactions run on the separate reader connection
 it.effect("rejects a write in a read-only transaction", () =>
   withReaderClient((sql) =>
@@ -366,6 +411,53 @@ it.effect("finishes masked database cleanup after its caller is interrupted", ()
 
 // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- a zero-delay macrotask boundary that lets the worker's queued messages land, not a wait for time
 const eventLoopTurn = Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+
+it.effect.each(["statement", "transaction", "reservation"] as const)(
+  "cancels a waiting reader without losing a pool slot ($0)",
+  (kind) =>
+    withReaderClient((sql) =>
+      Effect.gen(function* () {
+        const release = yield* Deferred.make<void>();
+        const holders = yield* Effect.forEach([0, 1], () =>
+          Effect.gen(function* () {
+            const held = yield* Deferred.make<void>();
+            const holder = yield* Effect.forkChild(
+              sql
+                .withTransaction(
+                  countEntries(sql).pipe(
+                    Effect.andThen(Deferred.succeed(held, undefined)),
+                    Effect.andThen(Deferred.await(release)),
+                  ),
+                )
+                .pipe(SqliteClient.readOnly),
+            );
+            yield* Deferred.await(held);
+            return holder;
+          }),
+        );
+        const workersBefore = startedWorkers.length;
+        const entered = yield* Deferred.make<void>();
+        const body = countEntries(sql).pipe(Effect.andThen(Deferred.succeed(entered, undefined)));
+        const acquire =
+          kind === "statement"
+            ? body
+            : kind === "transaction"
+              ? sql.withTransaction(body)
+              : Effect.scoped(
+                  sql.reserve.pipe(Effect.andThen(Deferred.succeed(entered, undefined))),
+                );
+        const waiter = yield* Effect.forkChild(acquire.pipe(SqliteClient.readOnly), {
+          startImmediately: true,
+        });
+        yield* Fiber.interrupt(waiter);
+        assert.isFalse(yield* Deferred.isDone(entered));
+        assert.equal(startedWorkers.length, workersBefore);
+        yield* Deferred.succeed(release, undefined);
+        yield* Effect.forEach(holders, Fiber.join);
+        assert.equal(yield* countEntries(sql).pipe(SqliteClient.readOnly), 1);
+      }),
+    ),
+);
 
 it.effect.each([
   { reservation: false, masked: false },
