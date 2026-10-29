@@ -72,6 +72,7 @@ import {
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
+import { overridesServiceTier, withInheritedServiceTier } from "./serviceTierInheritance.ts";
 import { recordThreadOpen } from "@t3tools/shared/paletteSearch";
 import {
   derivePendingBackgroundWork,
@@ -1156,6 +1157,43 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
       );
 
+  const resolveInheritedSelection = Effect.fn("Orchestrator.resolveInheritedSelection")(function* (
+    thread: OrchestrationV2AppThread,
+    selection: ModelSelection,
+  ) {
+    if (
+      thread.inheritServiceTier !== true ||
+      selection.instanceId !== thread.modelSelection.instanceId ||
+      selection.model !== thread.modelSelection.model
+    )
+      return selection;
+    let source = thread;
+    const seen = new Set<ThreadId>([thread.id]);
+    while (
+      source.inheritServiceTier === true &&
+      source.lineage.relationshipToParent === "subagent" &&
+      source.lineage.parentThreadId !== null &&
+      !seen.has(source.lineage.parentThreadId)
+    ) {
+      const parentId = source.lineage.parentThreadId;
+      seen.add(parentId);
+      const parent = yield* projectionStore.getThread(parentId).pipe(
+        Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+        Effect.mapError((cause) => new OrchestratorProjectionError({ threadId: parentId, cause })),
+      );
+      if (
+        parent === null ||
+        parent.deletedAt !== null ||
+        parent.providerInstanceId !== source.providerInstanceId
+      )
+        break;
+      source = parent;
+    }
+    return source === thread
+      ? selection
+      : withInheritedServiceTier(selection, source.modelSelection);
+  });
+
   const getProjectionWithPendingEvents =
     /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
     Effect.fnUntraced(function* (
@@ -1501,7 +1539,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const queuedMessage = projection.messages.find(
         (candidate) => candidate.id === storedQueuedRun.userMessageId,
       );
-      const modelSelection = queuedRunModelSelection(projection, storedQueuedRun);
+      const modelSelection = yield* resolveInheritedSelection(
+        projection.thread,
+        queuedRunModelSelection(projection, storedQueuedRun),
+      );
       const queuedRun = {
         ...storedQueuedRun,
         modelSelection,
@@ -3682,6 +3723,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             providerInstanceId: command.modelSelection.instanceId,
             modelSelection: command.modelSelection,
+            ...(thread.inheritServiceTier === true &&
+            overridesServiceTier(thread.modelSelection, command.modelSelection)
+              ? { inheritServiceTier: false }
+              : {}),
             updatedAt: now,
           };
       }
@@ -5260,7 +5305,29 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ]);
       projection = applyToProjection(projection, event);
     }
-    const modelSelection = command.modelSelection ?? projection.thread.modelSelection;
+    if (
+      projection.thread.inheritServiceTier === true &&
+      command.modelSelection !== undefined &&
+      (command.createdBy === "user" || command.creationSource === "mcp") &&
+      overridesServiceTier(projection.thread.modelSelection, command.modelSelection)
+    ) {
+      const now = yield* DateTime.now;
+      const event = yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.metadata-updated",
+        threadId: command.threadId,
+        providerInstanceId: projection.thread.providerInstanceId,
+        occurredAt: now,
+        payload: { ...projection.thread, inheritServiceTier: false, updatedAt: now },
+      });
+      projection = applyToProjection(projection, event);
+    }
+    const modelSelection = yield* resolveInheritedSelection(
+      projection.thread,
+      command.modelSelection ?? projection.thread.modelSelection,
+    );
     let dispatchMode = resolveMessageDispatchIntent(
       projection,
       command.dispatchMode,
@@ -7289,6 +7356,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
+        ...(command.inheritServiceTier === undefined
+          ? {}
+          : { inheritServiceTier: command.inheritServiceTier }),
         ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
       };
       const task: OrchestrationV2Subagent = {

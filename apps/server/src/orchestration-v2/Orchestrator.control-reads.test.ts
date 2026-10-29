@@ -63,6 +63,184 @@ const layerTest = Layer.mergeAll(
   ),
 );
 
+it.effect("delegate turns follow parent priority unless the child overrides it", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const selection = (tier: string) => ({
+      ...modelSelection,
+      options: [
+        { id: "reasoningEffort", value: "high" },
+        { id: "serviceTier", value: tier },
+      ],
+    });
+    for (const mode of [
+      "inherited",
+      "explicit",
+      "overridden",
+      "message-overridden",
+      "nested",
+      "legacy",
+    ] as const) {
+      const overridden = mode === "overridden" || mode === "message-overridden";
+      const parentId = ThreadId.make(`priority-parent:${mode}`);
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`priority-create:${mode}`),
+        threadId: parentId,
+        projectId: ProjectId.make("project:priority"),
+        title: "Parent",
+        modelSelection: selection("ultrafast"),
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`priority-start:${mode}`),
+        threadId: parentId,
+        messageId: MessageId.make(`priority-message:${mode}`),
+        text: "Delegate work",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const parent = yield* projections.getThreadRecords(parentId, ["runs"]);
+      const run = parent.runs[0]!;
+      yield* orchestrator.dispatch({
+        type: "delegated_task.request",
+        commandId: CommandId.make(`priority-delegate:${mode}`),
+        parentThreadId: parentId,
+        parentRunId: run.id,
+        parentNodeId: run.rootNodeId!,
+        task: "Continue the work",
+        modelSelection: selection("ultrafast"),
+        inheritServiceTier: mode === "legacy" ? undefined : mode !== "explicit",
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const task = (yield* projections.getThreadRecords(parentId, ["subagents"])).subagents[0]!;
+      let childId = task.childThreadId!;
+      if (mode === "nested") {
+        const nestedParent = yield* projections.getThreadRecords(childId, ["runs"]);
+        yield* orchestrator.dispatch({
+          type: "delegated_task.request",
+          commandId: CommandId.make("priority-grandchild"),
+          parentThreadId: childId,
+          parentRunId: nestedParent.runs[0]!.id,
+          parentNodeId: nestedParent.runs[0]!.rootNodeId!,
+          task: "Nested work",
+          modelSelection: selection("ultrafast"),
+          inheritServiceTier: true,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+        childId = (yield* projections.getThreadRecords(childId, ["subagents"])).subagents[0]!
+          .childThreadId!;
+      }
+      if (mode === "overridden") {
+        yield* orchestrator.dispatch({
+          type: "thread.model-selection.set",
+          commandId: CommandId.make(`priority-override:${mode}`),
+          threadId: childId,
+          modelSelection: selection("priority"),
+        });
+      }
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`priority-queue:${mode}`),
+        threadId: childId,
+        messageId: MessageId.make(`priority-followup:${mode}`),
+        text: "Continue",
+        ...(mode === "message-overridden" ? { modelSelection: selection("priority") } : {}),
+        attachments: [],
+        dispatchMode: { type: "queue_after_active" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.model-selection.set",
+        commandId: CommandId.make(`priority-change:${mode}`),
+        threadId: parentId,
+        modelSelection: {
+          ...modelSelection,
+          options: [
+            { id: "reasoningEffort", value: "max" },
+            { id: "serviceTier", value: "default" },
+          ],
+        },
+      });
+      const before = yield* projections.getThreadRecords(childId, ["runs"]);
+      assert.deepEqual(before.runs[0]!.modelSelection, selection("ultrafast"));
+      yield* projections.apply({
+        id: EventId.make(`priority-finish:${mode}`),
+        type: "run.updated",
+        threadId: childId,
+        runId: before.runs[0]!.id,
+        occurredAt: yield* DateTime.now,
+        payload: { ...before.runs[0]!, status: "completed", completedAt: yield* DateTime.now },
+      });
+      yield* orchestrator.dispatch({
+        type: "queue.resume",
+        commandId: CommandId.make(`priority-resume:${mode}`),
+        threadId: childId,
+      });
+      const after = yield* projections.getThreadRecords(childId, ["runs"]);
+      assert.deepEqual(
+        after.runs[1]!.modelSelection,
+        selection(
+          mode === "inherited" || mode === "nested"
+            ? "default"
+            : overridden
+              ? "priority"
+              : "ultrafast",
+        ),
+        mode,
+      );
+      yield* projections.apply({
+        id: EventId.make(`priority-finish-followup:${mode}`),
+        type: "run.updated",
+        threadId: childId,
+        runId: after.runs[1]!.id,
+        occurredAt: yield* DateTime.now,
+        payload: { ...after.runs[1]!, status: "completed", completedAt: yield* DateTime.now },
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.model-selection.set",
+        commandId: CommandId.make(`priority-upgrade:${mode}`),
+        threadId: parentId,
+        modelSelection: selection("priority"),
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`priority-direct-resume:${mode}`),
+        threadId: childId,
+        messageId: MessageId.make(`priority-direct-message:${mode}`),
+        text: "Resume",
+        modelSelection: after.thread.modelSelection,
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const resumed = yield* projections.getThreadRecords(childId, ["runs"]);
+      assert.deepEqual(
+        resumed.runs[2]!.modelSelection,
+        selection(mode === "explicit" || mode === "legacy" ? "ultrafast" : "priority"),
+        mode,
+      );
+    }
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("reads command history once when a message unsnoozes, unsettles, and seeds a title", () =>
   Effect.gen(function* () {
     const orchestrator = yield* Orchestrator.OrchestratorV2;

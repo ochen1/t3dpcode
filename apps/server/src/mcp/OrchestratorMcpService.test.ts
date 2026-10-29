@@ -2502,29 +2502,46 @@ describe("OrchestratorMcpService provider resolution", () => {
         const override = [{ id: "reasoningEffort", value: "max" }] as const;
         const cases = [
           {
+            name: "inherit priority",
+            target: {},
+            expected: inherited,
+            inheritsPriority: true,
+          },
+          {
             name: "partial override",
             target: { options: override },
             expected: { ...inherited, options: [...override, inherited.options[1]] },
+            inheritsPriority: true,
+          },
+          {
+            name: "explicit priority equal to parent",
+            target: { options: { serviceTier: "priority" } },
+            expected: inherited,
+            inheritsPriority: false,
           },
           {
             name: "clear with array",
             target: { options: [] },
             expected: { ...inherited, options: [] },
+            inheritsPriority: false,
           },
           {
             name: "clear with object",
             target: { options: {} },
             expected: { ...inherited, options: [] },
+            inheritsPriority: false,
           },
           {
             name: "change model",
             target: { model: "other-model" },
             expected: { instanceId: codexInstanceId, model: "other-model" },
+            inheritsPriority: false,
           },
           {
             name: "change provider with override",
             target: { providerInstanceId: peerId, options: { reasoningEffort: "max" } },
             expected: { instanceId: peerId, model: inherited.model, options: override },
+            inheritsPriority: false,
           },
         ] as const;
         for (const testCase of cases) {
@@ -2595,6 +2612,11 @@ describe("OrchestratorMcpService provider resolution", () => {
             assert.deepEqual(
               (commands[0] as { modelSelection: unknown }).modelSelection,
               testCase.expected,
+              testCase.name,
+            );
+            assert.equal(
+              (commands[0] as { inheritServiceTier: boolean }).inheritServiceTier,
+              testCase.inheritsPriority,
               testCase.name,
             );
           }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));

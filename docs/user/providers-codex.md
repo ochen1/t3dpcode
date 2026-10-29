@@ -76,6 +76,17 @@ reported accounts, refresh provider status, and confirm the second instance has
 its own shadow path and login. A shadow-home conflict usually means the directory
 contains a copied Codex setup. Use a fresh shadow directory and sign in again.
 
+## Priority for delegated work
+
+New T3-managed delegates on the same environment inherit the parent's service
+priority and follow later changes when their next turn starts, including queued
+turns and resumes. Active turns keep their current priority until they finish.
+
+An explicit delegate priority overrides inheritance. Changing a delegate's own
+priority, model, or provider makes its priority independent. Reasoning-effort
+changes alone preserve priority inheritance. Older delegates, native subagents,
+and tasks on linked environments retain their existing priority behavior.
+
 ## Answer questions while Codex works
 
 Codex can ask a question and keep working. Answer it in the thread's question

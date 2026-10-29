@@ -2284,6 +2284,11 @@ const make = Effect.gen(function* () {
           task: taskPrompt(input),
           ...(input.title === undefined ? {} : { title: input.title }),
           modelSelection: target.modelSelection,
+          inheritServiceTier:
+            target.modelSelection.instanceId === parent.thread.modelSelection.instanceId &&
+            target.modelSelection.model === parent.thread.modelSelection.model &&
+            input.target?.options?.length !== 0 &&
+            !input.target?.options?.some((option) => option.id === "serviceTier"),
           runtimeMode,
           interactionMode,
           ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
