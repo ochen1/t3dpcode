@@ -1668,6 +1668,16 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         recovery.runs.map((run) => run.id),
         [RunId.make("run:bounded-recovery:rolled-back")],
       );
+      const { statements: activeStatements, tracer: activeTracer } = traceSqlStatements();
+      const active = yield* store
+        .getThreadRecords(threadId, ["turnItems"], {
+          turnItemStatuses: ["pending", "running", "waiting"],
+        })
+        .pipe(Effect.withTracer(activeTracer));
+      assert.deepEqual(active.turnItems, recovery.turnItems);
+      const activeQuery = activeStatements.find((query) => query.includes("AND status IN"))!;
+      const activePlan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${activeQuery}`);
+      assert.isTrue(activePlan.some((row) => row.detail.includes("turn_items_live_idx")));
       for (const statement of statements.filter((query) =>
         query.trimStart().startsWith("SELECT"),
       )) {
@@ -6834,6 +6844,36 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           )
         `;
       }
+      const forkHistory = yield* projectionStore.getThreadSnapshot(targetThreadId);
+      const localAnchor = forkHistory.projection.visibleTurnItems.find(
+        (row) => row.sourceItemId === "turn-item:projection-fork-source-rollback:target:50",
+      )!;
+      const localCursor = encodeThreadHistoryCursor({
+        snapshotSequence: forkHistory.snapshotSequence,
+        sourceThreadId: localAnchor.sourceThreadId,
+        sourceItemId: localAnchor.sourceItemId,
+        position: localAnchor.position,
+      });
+      const expectedLocalPage = selectHistoryPageFromCursor({
+        items: forkHistory.projection.visibleTurnItems,
+        cursor: localCursor,
+        snapshotSequence: forkHistory.snapshotSequence,
+      });
+      const { statements: historyStatements, tracer: historyTracer } = traceSqlStatements();
+      const localPage = yield* projectionStore
+        .getThreadHistoryPage(targetThreadId, localCursor, undefined, false, "deferred")
+        .pipe(Effect.withTracer(historyTracer));
+      const localIndexQuery = historyStatements.find(
+        (statement) =>
+          statement.includes("AS persistent_output") && statement.includes("attempt.attempt_id"),
+      );
+      assert.include(localIndexQuery ?? "", "(item.ordinal, item.turn_item_id) <=");
+      assert.deepEqual(
+        localPage.items.map((row) => [row.visibility, row.sourceItemId]),
+        expectedLocalPage.items.map((row) => [row.visibility, row.sourceItemId]),
+      );
+      assert.equal(localPage.nextCursor, expectedLocalPage.nextCursor);
+
       const nestedThreadId = ThreadId.make("thread:projection-fork-source-rollback:nested");
       for (const ordinal of [
         ...Array.from({ length: 99 }, (_, index) => index + 1),

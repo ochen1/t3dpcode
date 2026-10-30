@@ -2961,6 +2961,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
 
         const turnItemRunIds = filter?.turnItemRunIds?.filter((id): id is RunId => id !== null);
         const includeRunlessItems = filter?.turnItemRunIds?.includes(null) === true;
+        // SQLite needs a literal status guard to use the partial index with json_each filters.
+        const liveTurnItemsOnly =
+          filter?.turnItemStatuses?.every(
+            (status) => status === "pending" || status === "running" || status === "waiting",
+          ) === true;
         const turnItemIndex =
           filter?.turnItemNodeIds !== undefined
             ? sql`INDEXED BY orchestration_v2_projection_turn_items_node_ordinal_idx`
@@ -2970,7 +2975,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ? sql`INDEXED BY orchestration_v2_projection_turn_items_thread_run_idx`
               : filter?.turnItemTypes !== undefined
                 ? sql`INDEXED BY orchestration_v2_projection_turn_items_thread_type_idx`
-                : sql``;
+                : liveTurnItemsOnly
+                  ? sql`INDEXED BY orchestration_v2_projection_turn_items_live_idx`
+                  : sql``;
         // A constant-false OR still prevents SQLite from seeking by run_id.
         const turnItemRunFilter =
           turnItemRunIds === undefined
@@ -3002,6 +3009,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ${turnItemIndex}
                 WHERE thread_id = ${threadId}
                   ${filter?.turnItemTypes === undefined ? sql`` : sql`AND type IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemTypes)}))`}
+                  ${liveTurnItemsOnly ? sql`AND status IN ('pending', 'running', 'waiting')` : sql``}
                   ${filter?.turnItemStatuses === undefined ? sql`` : sql`AND status IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemStatuses)}))`}
                   ${filter?.turnItemRunId === undefined ? sql`` : sql`AND run_id = ${filter.turnItemRunId}`}
                   ${filter?.turnItemNodeIds === undefined ? sql`` : sql`AND node_id IN (SELECT value FROM json_each(${encodeIdList(filter.turnItemNodeIds)}))`}
@@ -5484,10 +5492,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             status: row.status,
           })),
         };
-        // A local, unforked cursor keeps its canonical position in the prefix.
-        // Forks and missing anchors retain the full index for inherited ordering and cursor fallback.
+        // A local cursor keeps its canonical position: inherited history precedes the local prefix.
+        // Inherited and missing anchors retain the full index for cursor fallback.
         const anchors =
-          anchor?.st === threadId && thread.forkedFrom?.type !== "run"
+          anchor?.st === threadId
             ? yield* sql<{ ordinal: number; turn_item_id: string }>`
               SELECT ordinal, turn_item_id FROM orchestration_v2_projection_turn_items
               WHERE thread_id = ${threadId} AND turn_item_id = ${anchor.si}`
