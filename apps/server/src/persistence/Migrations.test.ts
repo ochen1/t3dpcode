@@ -147,19 +147,27 @@ describe("runMigrations", () => {
   );
 });
 
-// The npm launcher reads the highest migration id from these file names.
 it.effect("registers every migration file", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const dir = path.join(import.meta.dirname, "Migrations");
-    const files = (yield* fs.readDirectory(dir)).flatMap((name) => {
-      const match = /^(\d+)_(\w+)\.ts$/.exec(name);
-      return match ? [[Number(match[1]), match[2]] as const] : [];
+    const files = (yield* fs.readDirectory(dir)).flatMap((filename) => {
+      const match = /^(\d+)_(\w+)\.ts$/.exec(filename);
+      const name = match?.[2];
+      return name === undefined ? [] : [name];
     });
+    // These retired fork migrations remain available for legacy reconciliation tests.
+    const retired = new Set([
+      "RepairForkMigrationCollisions",
+      "BackfillProjectionThreadLatestTurn",
+      "ProjectionQueuedTurns",
+      "BackfillClaudeProviderThreadIds",
+      "BackfillCodexProviderThreadIds",
+    ]);
     assert.deepStrictEqual(
-      files.toSorted(([a], [b]) => a - b),
-      migrationManifest,
+      files.filter((name) => !retired.has(name)).sort(),
+      migrationManifest.map(([, name]) => name).sort(),
     );
   }).pipe(Effect.provide(NodeServices.layer)),
 );

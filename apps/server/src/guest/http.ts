@@ -1,6 +1,7 @@
 import {
   GUEST_ATTACHMENT_ROUTE,
   GUEST_COMMAND_OUTPUT_ROUTE,
+  GUEST_HISTORY_ROUTE,
   GUEST_ITEM_ROUTE,
   GUEST_MEDIA_ROUTE,
   GUEST_RENDER_ROUTE,
@@ -53,8 +54,7 @@ const encodeOutputFrame = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2CommandOutputFrame),
 );
 const encodeItem = Schema.encodeEffect(Schema.toCodecJson(OrchestrationV2GetTurnItemResult));
-
-const encodeHistory = Schema.encodeEffect(Schema.toCodecJson(OrchestrationV2ThreadHistoryPage));
+const encodeHistoryPage = Schema.encodeEffect(Schema.toCodecJson(OrchestrationV2ThreadHistoryPage));
 
 const errorResponse = (error: GuestShareAccessError) =>
   HttpServerResponse.json(
@@ -229,26 +229,6 @@ const submitRoute = HttpRouter.add(
   ),
 );
 
-const historyRoute = HttpRouter.add(
-  "GET",
-  `${GUEST_ROUTE_PREFIX}/history`,
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const cursor = new URLSearchParams(request.url.split("?", 2)[1] ?? "").get("cursor");
-    if (!cursor) return yield* badRequest;
-    const guestShares = yield* GuestShareService;
-    return yield* guestShares.history(yield* sessionToken, cursor).pipe(
-      Effect.flatMap((page) =>
-        encodeHistory(page).pipe(
-          Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })),
-        ),
-      ),
-      Effect.map((body) => HttpServerResponse.jsonUnsafe(body, { headers: NO_STORE })),
-      Effect.catchTags({ GuestShareAccessError: errorResponse }),
-    );
-  }),
-);
-
 const streamRoute = HttpRouter.add(
   "GET",
   `${GUEST_ROUTE_PREFIX}/stream`,
@@ -306,6 +286,26 @@ const itemRoute = HttpRouter.add(
     return yield* guestShares.item(yield* sessionToken, itemId).pipe(
       Effect.flatMap((result) =>
         encodeItem(result).pipe(
+          Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })),
+        ),
+      ),
+      Effect.map((body) => HttpServerResponse.jsonUnsafe(body, { headers: NO_STORE })),
+      Effect.catchTags({ GuestShareAccessError: errorResponse }),
+    );
+  }),
+);
+
+const historyRoute = HttpRouter.add(
+  "GET",
+  GUEST_HISTORY_ROUTE,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const cursor = new URLSearchParams(request.url.split("?", 2)[1] ?? "").get("cursor");
+    if (!cursor) return yield* badRequest;
+    const guestShares = yield* GuestShareService;
+    return yield* guestShares.history(yield* sessionToken, cursor).pipe(
+      Effect.flatMap((page) =>
+        encodeHistoryPage(page).pipe(
           Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })),
         ),
       ),
@@ -386,9 +386,9 @@ export const layer = Layer.mergeAll(
   sessionRoute,
   submitRoute,
   streamRoute,
-  historyRoute,
   renderRoute,
   itemRoute,
+  historyRoute,
   commandOutputRoute,
   attachmentRoute,
   mediaRoute,

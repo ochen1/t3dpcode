@@ -40,6 +40,7 @@ import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
@@ -330,6 +331,7 @@ it.effect.each(deliveries)("delivers %s without cancelling Claude's pending tool
                   }),
                 ),
                 Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+                Layer.provide(ManagedPolicy.layerTest()),
                 Layer.provide(
                   Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
                     namedProjectsRoot: "/projects",

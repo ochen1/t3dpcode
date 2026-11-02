@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   GUEST_MESSAGE_MAX_LENGTH,
+  GUEST_HISTORY_ROUTE,
   GUEST_NAME_MAX_LENGTH,
   GUEST_ROUTE_PREFIX,
   GUEST_SHARE_PARAM,
@@ -131,11 +132,33 @@ function takeGuestEntry(): GuestEntry {
   return capturedEntry;
 }
 
-const decodeHistoryPage = Schema.decodeUnknownSync(
+const decodeErrorBody = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.String }));
+const decodeHistoryPage = Schema.decodeUnknownOption(
   Schema.toCodecJson(OrchestrationV2ThreadHistoryPage),
 );
 
-const decodeErrorBody = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.String }));
+/** Resolves to the page, or to a message the guest can read. */
+async function fetchGuestHistoryPage(
+  shareId: string,
+  cursor: string,
+): Promise<OrchestrationV2ThreadHistoryPage | string> {
+  const failed = "Could not load earlier turns. Try again.";
+  try {
+    const response = await fetch(
+      `${GUEST_HISTORY_ROUTE}?${GUEST_SHARE_PARAM}=${encodeURIComponent(shareId)}&cursor=${encodeURIComponent(cursor)}`,
+    );
+    const json: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      return Option.match(decodeErrorBody(json), {
+        onNone: () => failed,
+        onSome: ({ message }) => message,
+      });
+    }
+    return Option.getOrElse(decodeHistoryPage(json), () => failed);
+  } catch {
+    return "Could not reach the server.";
+  }
+}
 
 /** Resolves to null on success, or to a message the guest can read. */
 async function postGuest(
@@ -275,21 +298,12 @@ function GuestSession({ shareId }: { readonly shareId: string }) {
     historyRequest.current = true;
     const generation = stream.historyGeneration;
     dispatch({ type: "history-start", cursor, generation });
-    try {
-      const query = new URLSearchParams({ [GUEST_SHARE_PARAM]: shareId, cursor });
-      const response = await fetch(`${GUEST_ROUTE_PREFIX}/history?${query}`);
-      if (!response.ok) throw new Error("Could not load earlier turns. Try again.");
-      const page = decodeHistoryPage(await response.json());
-      dispatch({ type: "history-page", cursor, generation, page });
-    } catch {
-      dispatch({
-        type: "history-error",
-        cursor,
-        generation,
-        error: "Could not load earlier turns. Try again.",
-      });
-    } finally {
-      historyRequest.current = false;
+    const result = await fetchGuestHistoryPage(shareId, cursor);
+    historyRequest.current = false;
+    if (typeof result === "string") {
+      dispatch({ type: "history-error", cursor, generation, error: result });
+    } else {
+      dispatch({ type: "history-page", cursor, generation, page: result });
     }
   };
 
@@ -303,12 +317,14 @@ function GuestSession({ shareId }: { readonly shareId: string }) {
         view={stream.view}
         projection={stream.projection}
         awaitingRowIds={stream.awaitingRowIds}
-        historyControls={{
-          ...stream.history,
-          onLoadEarlier: () => {
-            void loadEarlier();
-          },
-        }}
+        historyControls={
+          stream.history.hasMoreHistory
+            ? {
+                ...stream.history,
+                onLoadEarlier: () => void loadEarlier(),
+              }
+            : undefined
+        }
       />
     );
   }
@@ -399,7 +415,7 @@ function GuestThread({
   readonly view: GuestShareView;
   readonly projection: OrchestrationV2ThreadProjection;
   readonly awaitingRowIds: GuestStreamState["awaitingRowIds"];
-  readonly historyControls: MessagesTimelineHistoryControls;
+  readonly historyControls: MessagesTimelineHistoryControls | undefined;
 }) {
   // No ":" so the timeline finds no environment thread behind the key.
   const threadKey = `guest-${shareId}`;
@@ -516,7 +532,7 @@ function GuestThread({
             onAnchorSizeChanged={ignore}
             contentInsetEndAdjustment={0}
             emptyPlaceholderInset={0}
-            liveFollowEnabled={follow.timelineLiveFollowEnabled && !historyControls.loading}
+            liveFollowEnabled={follow.timelineLiveFollowEnabled && !historyControls?.loading}
             onIsAtEndChange={follow.onIsAtEndChangeStable}
             onViewportAttach={follow.attachTimelineViewport}
             footer={

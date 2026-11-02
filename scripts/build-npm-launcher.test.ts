@@ -106,7 +106,9 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-test-" });
+        const root = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-test-" }),
+        );
         const output = yield* buildNpmLauncher({
           version: VERSION,
           outputDir: path.join(root, "out"),
@@ -120,7 +122,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         assert.deepStrictEqual(manifest.bin, { t3: "./bin/t3.mjs" });
         assert.isUndefined(manifest.dependencies);
         assert.isUndefined(manifest.optionalDependencies);
-        assert.isAbove(npmReleaseDatabaseMigration(manifest) ?? 0, 0);
+        assert.equal(npmReleaseDatabaseMigration(manifest), 83);
 
         const installed = path.join(root, "installed");
         yield* fs.makeDirectory(installed);

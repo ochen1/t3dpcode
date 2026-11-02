@@ -82,6 +82,11 @@ import MessageSearchMigration from "./Migrations/069_ThreadMessageSearch.ts";
 import PeerLinksMigration from "./Migrations/070_PeerLinks.ts";
 import PeerLinkFenceMigration from "./Migrations/071_PeerLinkFence.ts";
 import WaitingLinkRequestIndexMigration from "./Migrations/072_WaitingLinkRequestIndex.ts";
+import Migration0073 from "./Migrations/073_ActiveTurnItemIndexes.ts";
+import Migration0074 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts";
+import Migration0075 from "./Migrations/075_SubagentDeliveryState.ts";
+import Migration0076 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
+import Migration0077 from "./Migrations/077_RepairBooleanSettledOverride.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -162,6 +167,11 @@ const migrationEntries = [
   [76, "PeerLinks", PeerLinksMigration],
   [77, "PeerLinkFence", PeerLinkFenceMigration],
   [78, "WaitingLinkRequestIndex", WaitingLinkRequestIndexMigration],
+  [79, "ActiveTurnItemIndexes", Migration0073],
+  [80, "ExcludeAttachmentPlaceholdersFromSearch", Migration0074],
+  [81, "SubagentDeliveryState", Migration0075],
+  [82, "ProjectionProjectsPinArchive", Migration0076],
+  [83, "RepairBooleanSettledOverride", Migration0077],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -46,18 +46,20 @@ export function npmLauncherPackageManifest(version: string, databaseMigration: n
   };
 }
 
-/** Highest server migration id, from the `NNN_Name.ts` files the server registers. */
+// Fork migration IDs follow the durable registry, not the upstream file names.
 const latestServerMigrationId = Effect.fn("latestServerMigrationId")(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const dir = yield* path.fromFileUrl(
-    new URL("../apps/server/src/persistence/Migrations/", import.meta.url),
+  const registry = yield* fs.readFileString(
+    yield* path.fromFileUrl(
+      new URL("../apps/server/src/persistence/Migrations.ts", import.meta.url),
+    ),
   );
-  const ids = (yield* fs.readDirectory(dir)).flatMap((name) => {
-    const id = /^(\d+)_\w+\.ts$/.exec(name)?.[1];
-    return id === undefined ? [] : [Number(id)];
-  });
-  return Math.max(0, ...ids);
+  const ids = Array.from(registry.matchAll(/^\s*\[(\d+), "\w+", \w+\],$/gm), (match) =>
+    Number(match[1]),
+  );
+  if (ids.length === 0) return yield* Effect.die(new Error("No server migrations are registered."));
+  return Math.max(...ids);
 });
 
 export const buildNpmLauncher = Effect.fn("buildNpmLauncher")(function* (input: {

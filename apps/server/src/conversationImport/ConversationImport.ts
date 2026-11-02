@@ -12,6 +12,7 @@ import {
   type ExternalConversationProvider,
   type ExternalConversationSummary,
   type ModelSelection,
+  type ProviderInstanceEnvironment,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
@@ -124,10 +125,11 @@ function previewFromPrompt(prompt: string): string {
 }
 
 function environmentValue(
-  environment: ReadonlyArray<{ readonly name: string; readonly value: string }> | undefined,
+  environment: ProviderInstanceEnvironment | undefined,
   name: string,
 ): string | undefined {
-  const value = environment?.find((entry) => entry.name === name)?.value.trim();
+  const configured = environment?.find((entry) => entry.name === name)?.value;
+  const value = typeof configured === "string" ? configured.trim() : undefined;
   return value && value.length > 0 ? value : undefined;
 }
 
