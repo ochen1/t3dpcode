@@ -1,3 +1,5 @@
+import { msg } from "gt-react-native";
+import { m } from "../../i18n/messages";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { AppState, Platform } from "react-native";
@@ -89,7 +91,7 @@ export async function refreshSelfHostedNotificationRegistration(): Promise<void>
       registerWithConnection(connection, {
         deviceId,
         expoPushToken: token.data,
-        label: Constants.deviceName?.trim() || "Android device",
+        label: Constants.deviceName?.trim() || m(msg("Android device")),
       }),
     ),
   );

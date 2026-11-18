@@ -8,7 +8,9 @@ import type {
 } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeftIcon, CheckIcon, DownloadIcon, SearchIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import { msg, T, useGT } from "gt-react";
+import { m } from "../i18n/messages";
 
 import { orchestrationEnvironment } from "../state/orchestration";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -32,7 +34,7 @@ function conversationKey(conversation: ExternalConversationSummary): string {
 function errorMessage(value: unknown): string {
   return value instanceof Error && value.message.trim().length > 0
     ? value.message
-    : "The conversation could not be imported.";
+    : m(msg("The conversation could not be imported."));
 }
 
 export function ExternalConversationImportDialog({
@@ -42,6 +44,7 @@ export function ExternalConversationImportDialog({
   readonly onBack: () => void;
   readonly onClose: () => void;
 }) {
+  const gt = useGT();
   const navigate = useNavigate();
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
@@ -62,8 +65,12 @@ export function ExternalConversationImportDialog({
       : undefined;
   const defaultEnvironmentId =
     routeThread?.environmentId ?? primaryEnvironmentId ?? projects[0]?.environmentId ?? null;
-  const [environmentId, setEnvironmentId] = useState<EnvironmentId | null>(defaultEnvironmentId);
-  const [projectId, setProjectId] = useState<ProjectId | null>(routeThread?.projectId ?? null);
+  const [selectedEnvironmentId, setEnvironmentId] = useState<EnvironmentId | null>(
+    defaultEnvironmentId,
+  );
+  const [selectedProjectId, setProjectId] = useState<ProjectId | null>(
+    routeThread?.projectId ?? null,
+  );
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [importingKey, setImportingKey] = useState<string | null>(null);
@@ -71,6 +78,25 @@ export function ExternalConversationImportDialog({
   const importConversation = useAtomCommand(orchestrationEnvironment.importExternalConversation, {
     reportFailure: false,
   });
+  const environmentItems = Array.from(
+    new Set(
+      projects
+        .filter(
+          (project) =>
+            serverConfigs.get(project.environmentId)?.environment.capabilities
+              .externalConversationImport === true,
+        )
+        .map((project) => project.environmentId),
+    ),
+  ).map((id) => ({
+    value: id,
+    label: environments.find((environment) => environment.environmentId === id)?.label ?? id,
+  }));
+
+  const environmentId =
+    environmentItems.find((item) => item.value === selectedEnvironmentId)?.value ??
+    environmentItems[0]?.value ??
+    null;
   const conversationQuery = useEnvironmentQuery(
     environmentId === null ||
       serverConfigs.get(environmentId)?.environment.capabilities.externalConversationImport !== true
@@ -80,94 +106,43 @@ export function ExternalConversationImportDialog({
           input: { limit: 500 },
         }),
   );
-  const environmentProjects = useMemo(
-    () => projects.filter((project) => project.environmentId === environmentId),
-    [environmentId, projects],
-  );
-  const visibleConversations = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    const conversations = conversationQuery.data?.conversations ?? [];
-    if (normalized.length === 0) return conversations;
-    return conversations.filter((conversation) =>
+  const environmentProjects = projects.filter((project) => project.environmentId === environmentId);
+  const normalized = query.trim().toLowerCase();
+  const visibleConversations = (conversationQuery.data?.conversations ?? []).filter(
+    (conversation) =>
+      normalized.length === 0 ||
       [
         conversation.title,
         conversation.preview,
         conversation.cwd ?? "",
         conversation.providerLabel,
       ].some((candidate) => candidate.toLowerCase().includes(normalized)),
-    );
-  }, [conversationQuery.data?.conversations, query]);
-  const selectedConversation = useMemo(
-    () =>
-      visibleConversations.find((conversation) => conversationKey(conversation) === selectedKey) ??
-      visibleConversations[0] ??
-      null,
-    [selectedKey, visibleConversations],
   );
+  const selectedConversation =
+    visibleConversations.find((conversation) => conversationKey(conversation) === selectedKey) ??
+    visibleConversations[0] ??
+    null;
+  const projectId =
+    environmentProjects.find((project) => project.id === selectedProjectId)?.id ??
+    environmentProjects.find((project) => project.workspaceRoot === selectedConversation?.cwd)
+      ?.id ??
+    environmentProjects[0]?.id ??
+    null;
+  const projectItems = environmentProjects.map((project) => ({
+    value: project.id,
+    label: project.title,
+  }));
 
-  useEffect(() => {
-    if (environmentId === null || environmentProjects.length === 0) {
-      if (projectId !== null) setProjectId(null);
-      return;
-    }
-    const currentExists = environmentProjects.some((project) => project.id === projectId);
-    if (!currentExists) setProjectId(environmentProjects[0]!.id);
-  }, [environmentId, environmentProjects, projectId]);
+  const navigateToThread = async (threadId: ThreadId) => {
+    if (environmentId === null) return;
+    await navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+    });
+    onClose();
+  };
 
-  useEffect(() => {
-    if (!selectedConversation?.cwd) return;
-    const matchingProject = environmentProjects.find(
-      (project) => project.workspaceRoot === selectedConversation.cwd,
-    );
-    if (matchingProject) setProjectId(matchingProject.id);
-  }, [environmentProjects, selectedConversation?.cwd]);
-
-  const environmentItems = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          projects
-            .filter(
-              (project) =>
-                serverConfigs.get(project.environmentId)?.environment.capabilities
-                  .externalConversationImport === true,
-            )
-            .map((project) => project.environmentId),
-        ),
-      ).map((id) => ({
-        value: id,
-        label: environments.find((environment) => environment.environmentId === id)?.label ?? id,
-      })),
-    [environments, projects, serverConfigs],
-  );
-
-  useEffect(() => {
-    if (
-      environmentId === null ||
-      !environmentItems.some((environment) => environment.value === environmentId)
-    ) {
-      setEnvironmentId(environmentItems[0]?.value ?? null);
-    }
-  }, [environmentId, environmentItems]);
-
-  const projectItems = useMemo(
-    () => environmentProjects.map((project) => ({ value: project.id, label: project.title })),
-    [environmentProjects],
-  );
-
-  const navigateToThread = useCallback(
-    async (threadId: ThreadId) => {
-      if (environmentId === null) return;
-      await navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
-      });
-      onClose();
-    },
-    [environmentId, navigate, onClose],
-  );
-
-  const handleImport = useCallback(async () => {
+  const handleImport = async () => {
     if (!selectedConversation || !environmentId || !projectId) return;
     if (selectedConversation.importedThreadId) {
       await navigateToThread(selectedConversation.importedThreadId);
@@ -190,18 +165,20 @@ export function ExternalConversationImportDialog({
       return;
     }
     await navigateToThread(result.value.threadId);
-  }, [environmentId, importConversation, navigateToThread, projectId, selectedConversation]);
+  };
 
   return (
     <div className="flex h-[min(620px,calc(100vh-5rem))] flex-col">
       <div className="flex items-start gap-3 border-b px-4 py-3">
-        <Button aria-label="Back to commands" size="icon-sm" variant="ghost" onClick={onBack}>
+        <Button aria-label={gt("Back to commands")} size="icon-sm" variant="ghost" onClick={onBack}>
           <ArrowLeftIcon />
         </Button>
         <div className="min-w-0 flex-1">
-          <h2 className="font-semibold text-base">Import conversation</h2>
+          <h2 className="font-semibold text-base">
+            <T>Import conversation</T>
+          </h2>
           <p className="text-muted-foreground text-xs">
-            Bring in Claude Code or Codex messages and complete tool history.
+            <T>Bring in Claude Code or Codex messages and complete tool history.</T>
           </p>
         </div>
       </div>
@@ -212,11 +189,12 @@ export function ExternalConversationImportDialog({
           items={environmentItems}
           onValueChange={(value) => {
             setEnvironmentId(value as EnvironmentId);
+            setProjectId(null);
             setSelectedKey(null);
             setError(null);
           }}
         >
-          <SelectTrigger aria-label="Import from environment" size="sm">
+          <SelectTrigger aria-label={gt("Import from environment")} size="sm">
             <SelectValue />
           </SelectTrigger>
           <SelectPopup>
@@ -232,7 +210,7 @@ export function ExternalConversationImportDialog({
             <SearchIcon />
           </InputGroupAddon>
           <InputGroupInput
-            placeholder="Search conversations"
+            placeholder={gt("Search conversations")}
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
@@ -244,7 +222,7 @@ export function ExternalConversationImportDialog({
           {conversationQuery.isPending && conversationQuery.data === null ? (
             <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground text-sm">
               <Spinner className="size-4" />
-              Finding local conversations…
+              <T>Finding local conversations…</T>
             </div>
           ) : conversationQuery.error ? (
             <div className="p-8 text-center text-destructive text-sm">
@@ -255,16 +233,16 @@ export function ExternalConversationImportDialog({
                 variant="outline"
                 onClick={conversationQuery.refresh}
               >
-                Try again
+                <T>Try again</T>
               </Button>
             </div>
           ) : visibleConversations.length === 0 ? (
             <div className="p-10 text-center text-muted-foreground text-sm">
               {environmentItems.length === 0
-                ? "No connected environment supports conversation imports."
+                ? gt("No connected environment supports conversation imports.")
                 : query.trim()
-                  ? "No conversations match your search."
-                  : "No Claude Code or Codex conversations were found on this environment."}
+                  ? gt("No conversations match your search.")
+                  : gt("No Claude Code or Codex conversations were found on this environment.")}
             </div>
           ) : (
             visibleConversations.map((conversation) => {
@@ -283,10 +261,12 @@ export function ExternalConversationImportDialog({
                   )}
                   onClick={() => {
                     setSelectedKey(key);
+                    setProjectId(null);
                     setError(null);
                   }}
                   onDoubleClick={() => {
                     setSelectedKey(key);
+                    setProjectId(null);
                     if (conversation.importedThreadId)
                       void navigateToThread(conversation.importedThreadId);
                   }}
@@ -311,7 +291,7 @@ export function ExternalConversationImportDialog({
                       ) : null}
                       {conversation.importedThreadId ? (
                         <span className="ms-auto inline-flex shrink-0 items-center gap-1 text-success">
-                          <CheckIcon className="size-3" /> Imported
+                          <CheckIcon className="size-3" /> <T>Imported</T>
                         </span>
                       ) : null}
                     </span>
@@ -325,13 +305,15 @@ export function ExternalConversationImportDialog({
 
       <div className="space-y-2 border-t bg-muted/35 p-3">
         <div className="flex items-center gap-2">
-          <span className="shrink-0 text-muted-foreground text-xs">Add to</span>
+          <span className="shrink-0 text-muted-foreground text-xs">
+            <T>Add to</T>
+          </span>
           <Select
             value={projectId}
             items={projectItems}
             onValueChange={(value) => setProjectId(value as ProjectId)}
           >
-            <SelectTrigger aria-label="Target project" className="min-w-0 flex-1" size="sm">
+            <SelectTrigger aria-label={gt("Target project")} className="min-w-0 flex-1" size="sm">
               <SelectValue />
             </SelectTrigger>
             <SelectPopup>
@@ -359,7 +341,7 @@ export function ExternalConversationImportDialog({
             ) : (
               <DownloadIcon />
             )}
-            {selectedConversation?.importedThreadId ? "Open" : "Import"}
+            {selectedConversation?.importedThreadId ? gt("Open") : gt("Import")}
           </Button>
         </div>
         {error ? <p className="text-destructive text-xs">{error}</p> : null}

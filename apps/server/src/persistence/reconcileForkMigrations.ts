@@ -15,6 +15,21 @@ const FORK_MIGRATIONS = new Map([
 /** Preserve the fork ledger separately so its shared IDs cannot skip V2 setup. */
 export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const tables =
+    yield* sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'`;
+  if (tables.length === 0) return;
+  const candidates = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 54`;
+  if (
+    !candidates.some(
+      (row) =>
+        (row.name === "SelfHostedPushDevices" && [59, 61, 63].includes(row.migration_id)) ||
+        (row.migration_id !== 59 && FORK_MIGRATIONS.get(row.migration_id) === row.name),
+    )
+  )
+    return;
   yield* sql.withTransaction(
     Effect.gen(function* () {
       const tables =

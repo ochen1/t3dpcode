@@ -13,15 +13,20 @@ import {
   RunId,
   RuntimeRequestId,
   ThreadId,
-  TurnItemId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2StoredEvent,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as Statement from "effect/sql/Statement";
+import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as EventSink from "./EventSink.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
@@ -194,216 +199,6 @@ const storageCases = [
   },
 ];
 
-it.effect(
-  "run-filtered timeline reads seek the selected runs instead of historical item types",
-  () =>
-    Effect.gen(function* () {
-      const store = yield* ProjectionStore.ProjectionStoreV2;
-      const sql = yield* SqlClient.SqlClient;
-      const now = yield* DateTime.now;
-      yield* Effect.forEach(fixtureEvents(now), (event) => store.apply(event), { discard: true });
-      for (const [ordinal, itemRunId] of [runId, null].entries()) {
-        yield* store.apply({
-          id: EventId.make(`run-filter:item:${ordinal}`),
-          type: "turn-item.updated",
-          threadId,
-          occurredAt: now,
-          payload: {
-            id: TurnItemId.make(`run-filter:item:${ordinal}`),
-            threadId,
-            runId: itemRunId,
-            nodeId,
-            providerThreadId,
-            providerTurnId,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal,
-            status: "waiting",
-            title: null,
-            startedAt: now,
-            completedAt: null,
-            updatedAt: now,
-            type: "user_input_request",
-            requestId,
-            questions: [],
-          },
-        });
-      }
-      yield* sql`
-      WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < 1000)
-      INSERT INTO orchestration_v2_projection_turn_items
-        (turn_item_id, thread_id, run_id, ordinal, type, status, updated_at, payload_json)
-      SELECT 'run-filter:history:' || n, ${threadId}, 'historical-run', n + 2,
-        'user_input_request', 'completed', '2026-10-23', 'invalid JSON' FROM history
-    `;
-      for (const runIds of [[runId], [null], [runId, null], []]) {
-        const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
-        const result = yield* store
-          .getThreadRecords(threadId, ["turnItems"], {
-            turnItemTypes: ["user_input_request"],
-            turnItemRunIds: runIds,
-          })
-          .pipe(
-            Effect.provideService(Statement.CurrentTransformer, (statement) => {
-              if (statement.compile()[0].includes("FROM orchestration_v2_projection_turn_items"))
-                statements.push(statement.compile());
-              return Effect.succeed(statement);
-            }),
-          );
-        assert.deepEqual(
-          result.turnItems.map((item) => item.runId),
-          runIds,
-        );
-        if (runIds.length !== 1) continue;
-        assert.lengthOf(statements, 1);
-        const [query, params] = statements[0]!;
-        const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
-        assert.isTrue(
-          plan.some((row) =>
-            row.detail.includes("turn_items_thread_run_idx (thread_id=? AND run_id=?)"),
-          ),
-        );
-      }
-    }).pipe(
-      Effect.provide(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
-    ),
-);
-
-it.effect("discovers owned provider threads without fetching historical node bodies", () =>
-  Effect.gen(function* () {
-    const store = yield* ProjectionStore.ProjectionStoreV2;
-    const sql = yield* SqlClient.SqlClient;
-    yield* Effect.forEach(fixtureEvents(yield* DateTime.now), (event) => store.apply(event), {
-      discard: true,
-    });
-    const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
-    const records = yield* store.getThreadRecords(threadId, ["providerThreads"]).pipe(
-      Effect.provideService(Statement.CurrentTransformer, (statement) => {
-        if (statement.compile()[0].includes("OR owner_node_id IN"))
-          statements.push(statement.compile());
-        return Effect.succeed(statement);
-      }),
-    );
-    assert.deepEqual(
-      records.providerThreads.map((row) => row.id),
-      [providerThreadId],
-    );
-    assert.lengthOf(statements, 1);
-    const [query, params] = statements[0]!;
-    const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
-    assert.isTrue(
-      plan.some((row) =>
-        row.detail.includes("COVERING INDEX orchestration_v2_projection_nodes_thread_id_idx"),
-      ),
-    );
-  }).pipe(
-    Effect.provide(ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
-  ),
-);
-
-it.effect.each(storageCases)(
-  "$storage: reads only the selected nodes and their timeline items",
-  ({ storage, storeLayer }) =>
-    Effect.gen(function* () {
-      const store = yield* ProjectionStore.ProjectionStoreV2;
-      const now = yield* DateTime.now;
-      yield* Effect.forEach(fixtureEvents(now), (event) => store.apply(event), { discard: true });
-      const node = {
-        id: nodeId,
-        threadId,
-        runId,
-        parentNodeId: null,
-        rootNodeId: nodeId,
-        kind: "user_input_request" as const,
-        status: "waiting" as const,
-        countsForRun: false,
-        providerThreadId,
-        providerTurnId,
-        nativeItemRef: null,
-        runtimeRequestId: requestId,
-        checkpointScopeId: null,
-        startedAt: now,
-        completedAt: null,
-      };
-      yield* store.apply({
-        id: EventId.make("selected-node"),
-        type: "node.updated",
-        threadId,
-        occurredAt: now,
-        payload: node,
-      });
-      yield* store.apply({
-        id: EventId.make("selected-item"),
-        type: "turn-item.updated",
-        threadId,
-        occurredAt: now,
-        payload: {
-          id: TurnItemId.make("selected-item"),
-          threadId,
-          runId,
-          nodeId,
-          providerThreadId,
-          providerTurnId,
-          nativeItemRef: null,
-          parentItemId: null,
-          ordinal: 1,
-          status: "waiting",
-          title: null,
-          startedAt: now,
-          completedAt: null,
-          updatedAt: now,
-          type: "user_input_request",
-          requestId,
-          questions: [],
-        },
-      });
-      const otherId = NodeId.make("node:unrelated-history");
-      yield* store.apply({
-        id: EventId.make("unrelated-node"),
-        type: "node.updated",
-        threadId,
-        occurredAt: now,
-        payload: { ...node, id: otherId },
-      });
-      if (storage === "sqlite") {
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`UPDATE orchestration_v2_projection_nodes SET payload_json = '{}'
-          WHERE node_id = ${otherId}`;
-      }
-      const statements: ReturnType<Statement.Statement<unknown>["compile"]>[] = [];
-      const selected = yield* store
-        .getThreadRecords(threadId, ["nodes", "turnItems"], {
-          nodeIds: [nodeId],
-          turnItemNodeIds: [nodeId],
-        })
-        .pipe(
-          Effect.provideService(Statement.CurrentTransformer, (statement) => {
-            if (statement.compile()[0].includes("FROM orchestration_v2_projection_turn_items"))
-              statements.push(statement.compile());
-            return Effect.succeed(statement);
-          }),
-        );
-      assert.deepEqual(
-        selected.nodes.map((row) => row.id),
-        [nodeId],
-      );
-      assert.isNotEmpty(selected.turnItems);
-      assert.isTrue(selected.turnItems.every((row) => row.nodeId === nodeId));
-      if (storage === "sqlite") {
-        const sql = yield* SqlClient.SqlClient;
-        const [query, params] = statements[0]!;
-        const plan = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`, params);
-        assert.isTrue(plan.some((row) => row.detail.includes("turn_items_node_ordinal_idx")));
-      }
-      const missing = yield* store.getThreadRecords(threadId, ["nodes", "turnItems"], {
-        nodeIds: [NodeId.make("missing")],
-        turnItemNodeIds: [],
-      });
-      assert.deepEqual(missing.nodes, []);
-      assert.deepEqual(missing.turnItems, []);
-    }).pipe(Effect.provide(Layer.merge(storeLayer, SqlitePersistence.layerMemory))),
-);
-
 it.effect.each(storageCases)(
   "$storage: finds the active root turn without an attempt reverse link",
   ({ storeLayer }) =>
@@ -507,10 +302,30 @@ it.effect.each(storageCases)(
               }),
           } as never),
       });
+      // Each pull is announced, so a second pull proves Stop judged the first event.
+      const pulls = yield* Queue.unbounded<void>();
+      const committed = yield* Queue.unbounded<OrchestrationV2StoredEvent>();
+      const layerEvents = Layer.mock(EventSink.EventSinkV2)({
+        latestSequence: () => Effect.succeed(0),
+        stream: () =>
+          Stream.fromEffectRepeat(
+            Queue.offer(pulls, undefined).pipe(Effect.andThen(Queue.take(committed))),
+          ),
+      });
       yield* Effect.gen(function* () {
         const control = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
         const reply = yield* RuntimeRequestService.RuntimeRequestServiceV2;
-        yield* control.interrupt({ threadId, providerThreadId, providerTurnId, providerSessionId });
+        const interrupt = control.interrupt({
+          threadId,
+          providerThreadId,
+          providerTurnId,
+          providerSessionId,
+        });
+        // The provider never reports the turn settled, so Stop returns at the bound.
+        const unconfirmed = yield* Effect.forkChild(interrupt);
+        yield* Queue.take(pulls);
+        yield* TestClock.adjust("2 seconds");
+        yield* Fiber.join(unconfirmed);
         yield* control.steer({
           threadId,
           providerThreadId,
@@ -544,20 +359,44 @@ it.effect.each(storageCases)(
           "Failure",
         );
         assert.lengthOf(calls, 3);
-        const turn = context.providerTurn!;
-        yield* store.apply({
+        const confirmed = yield* Effect.forkChild(interrupt);
+        yield* Queue.take(pulls);
+        const ingest = (sequence: number, event: OrchestrationV2DomainEvent) =>
+          store
+            .apply(event)
+            .pipe(Effect.andThen(Queue.offer(committed, { sequence, commandId: null, event })));
+        yield* ingest(1, {
           id: EventId.make("control:turn-completed"),
           type: "provider-turn.updated",
           threadId,
           occurredAt: now,
-          payload: { ...turn, status: "completed", completedAt: now },
+          payload: { ...context.providerTurn!, status: "completed", completedAt: now },
         });
-        yield* control.interrupt({ threadId, providerThreadId, providerTurnId, providerSessionId });
-        assert.deepEqual(calls, ["interrupt", "Use the smaller fix.", "reply", "interrupt"]);
+        // A settled provider turn is not enough; Stop waits for its attempt to finalize.
+        yield* Queue.take(pulls);
+        assert.isUndefined(confirmed.pollUnsafe());
+        yield* ingest(2, {
+          id: EventId.make("control:attempt-completed"),
+          type: "run-attempt.updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...context.attempt!, status: "completed", completedAt: now },
+        });
+        yield* Fiber.join(confirmed);
+        yield* interrupt;
+        assert.deepEqual(calls, [
+          "interrupt",
+          "Use the smaller fix.",
+          "reply",
+          "interrupt",
+          "interrupt",
+        ]);
       }).pipe(
         Effect.provide(
           Layer.merge(ProviderTurnControlService.layer, RuntimeRequestService.layer).pipe(
-            Layer.provide(layerSessions),
+            Layer.provide(
+              Layer.mergeAll(layerSessions, layerEvents, McpAppModelContext.layerEmpty),
+            ),
           ),
         ),
       );

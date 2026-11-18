@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as Exit from "effect/Exit";
 import {
   CheckpointScopeId,
   ContextTransferId,
@@ -205,7 +206,9 @@ it.effect.each(["sqlite"] as const)(
         assert.equal((yield* Effect.exit(store.getThreadProjection(threadId)))._tag, "Failure");
       }
       assert.deepEqual(yield* store.getRun(threadId, runId), run);
-      assert.isUndefined(yield* store.getRun(ThreadId.make("unrelated-thread"), runId));
+      assert.isTrue(
+        Exit.isFailure(yield* Effect.exit(store.getRun(ThreadId.make("unrelated-thread"), runId))),
+      );
       assert.isUndefined(yield* store.getRun(threadId, RunId.make("missing-run")));
       const selected = yield* store.getThreadRecords(threadId, ["runs", "messages"], {
         runIds: [runId],
@@ -286,7 +289,7 @@ it.effect.each(["sqlite"] as const)(
       );
       assert.equal(context.messages.find((m) => m.id === messageId)?.text, "Continue");
       assert.isTrue(context.hasConversation);
-      assert.equal(context.nextTurnItemOrdinal, 1);
+      assert.deepEqual(context.turnItems, []);
       assert.deepEqual(yield* store.getTurnStartHistory(threadId), [item]);
       assert.deepEqual(yield* store.getTurnStartHistory(threadId, [oldRunId]), [item]);
       assert.deepEqual(yield* store.getTurnStartHistory(threadId, [runId]), []);
@@ -355,6 +358,37 @@ it.effect.each(["sqlite"] as const)(
         (yield* store.getTurnStartContext(threadId, runId)).messages.map((m) => m.id),
         marker.id,
       );
+      const originalId = MessageId.make("unsent-original");
+      yield* store.apply({
+        id: EventId.make("unsent-original-event"),
+        type: "message.updated",
+        threadId,
+        runId: oldRunId,
+        occurredAt: now,
+        payload: { ...message, id: originalId, runId: oldRunId, text: "Original request" },
+      });
+      yield* putRun({
+        ...run,
+        id: oldRunId,
+        ordinal: 1,
+        status: "interrupted",
+        userMessageId: originalId,
+      });
+      const retryId = RunId.make("unsent-retry");
+      yield* putRun({ ...run, ordinal: 3, manualContinuationOfRunId: retryId });
+      yield* putRun({
+        ...run,
+        id: retryId,
+        ordinal: 2,
+        status: "interrupted",
+        manualContinuationOfRunId: oldRunId,
+      });
+      assert.equal(
+        (yield* store.getTurnStartContext(threadId, runId)).messages.find(
+          (m) => m.id === originalId,
+        )?.text,
+        "Original request",
+      );
       const other = ThreadId.make("other");
       yield* putThread({ ...thread, id: other });
       assert.deepEqual((yield* store.getTurnStartContext(other, runId)).messages, []);
@@ -409,11 +443,30 @@ it.effect.each(["sqlite"] as const)(
           },
         },
       });
+      const recordingId = "thread-completion-reads-0b9f6c1e-3c1d-4f7a-9d2e-5a6b7c8d9e0f-webm";
+      yield* store.apply({
+        id: EventId.make("attachment:recording-event"),
+        type: "turn-item.updated",
+        threadId,
+        runId: oldRunId,
+        occurredAt: now,
+        payload: {
+          ...item,
+          id: TurnItemId.make("attachment:recording"),
+          type: "dynamic_tool",
+          toolName: "mcp__t3-code__preview_recording_stop",
+          input: {},
+          output: [
+            { type: "text", text: JSON.stringify({ id: recordingId, mimeType: "video/webm" }) },
+          ],
+        },
+      });
       assert.deepEqual((yield* store.getThreadAttachmentIds(threadId)).toSorted(), [
         "answer-document",
         "answer-image",
         "attachment:old",
         "message-file",
+        recordingId,
       ]);
     }).pipe(Effect.provide(layerDatabase)),
 );

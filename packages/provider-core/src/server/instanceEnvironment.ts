@@ -2,7 +2,7 @@ import type { ProviderInstanceEnvironment } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 
-import { expandHomePath } from "./pathExpansion.ts";
+import { expandHomeVariable } from "./pathExpansion.ts";
 
 export const mergeProviderInstanceEnvironment = Effect.fn(function* (
   environment: ProviderInstanceEnvironment | undefined,
@@ -31,10 +31,7 @@ export const mergeProviderInstanceEnvironment = Effect.fn(function* (
       }
     }
     if (name === "XPC_FLAGS" || name === "XPC_SERVICE_NAME") continue;
-    next[name] =
-      name === "CODEX_HOME" || name === "CLAUDE_CONFIG_DIR"
-        ? expandHomePath(variable.value, home)
-        : variable.value;
+    next[name] = expandHomeVariable(name, variable.value, home);
   }
   return next;
 });

@@ -143,6 +143,7 @@ const make = Effect.gen(function* () {
       environmentId: yield* environment.getEnvironmentId,
       thread,
       project,
+      pendingSubagentRequest: null,
     }).state;
     const identity = agentAwarenessPublishIdentity(state);
     const previous = (yield* Ref.get(lastStateByThread)).get(threadId);

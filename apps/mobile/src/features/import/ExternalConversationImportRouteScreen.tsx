@@ -1,5 +1,8 @@
+import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import { LegendList } from "@legendapp/list/react-native";
-import { useNavigation } from "@react-navigation/native";
+import { msg, T, useGT } from "gt-react-native";
+import { m } from "../../i18n/messages";
+import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import type { MenuAction } from "@react-native-menu/menu";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
@@ -8,18 +11,17 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, TextInput, View } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ControlPill } from "../../components/ui/ControlPill";
 import { Menu } from "../../components/ui/Menu";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { relativeTime } from "../../lib/time";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useProjects, useServerConfigs } from "../../state/entities";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useEnvironmentQuery } from "../../state/query";
@@ -33,19 +35,20 @@ function conversationKey(conversation: ExternalConversationSummary): string {
 function errorMessage(value: unknown): string {
   return value instanceof Error && value.message.trim().length > 0
     ? value.message
-    : "The conversation could not be imported.";
+    : m(msg("The conversation could not be imported."));
 }
 
 export function ExternalConversationImportRouteScreen() {
-  const navigation = useNavigation();
+  const gt = useGT();
+  const selectDetail = useSelectWorkspaceDetail();
   const insets = useSafeAreaInsets();
   const projects = useProjects();
   const serverConfigs = useServerConfigs();
   const { savedConnectionsById } = useSavedRemoteConnections();
-  const [environmentId, setEnvironmentId] = useState<EnvironmentId | null>(
+  const [selectedEnvironmentId, setEnvironmentId] = useState<EnvironmentId | null>(
     projects[0]?.environmentId ?? null,
   );
-  const [projectId, setProjectId] = useState<ProjectId | null>(null);
+  const [selectedProjectId, setProjectId] = useState<ProjectId | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [importingKey, setImportingKey] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -70,10 +73,18 @@ export function ExternalConversationImportRouteScreen() {
       }))
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [projects, savedConnectionsById, serverConfigs]);
+  const environmentId =
+    environments.find((item) => item.environmentId === selectedEnvironmentId)?.environmentId ??
+    environments[0]?.environmentId ??
+    null;
   const environmentProjects = useMemo(
     () => projects.filter((project) => project.environmentId === environmentId),
     [environmentId, projects],
   );
+  const projectId =
+    environmentProjects.find((item) => item.id === selectedProjectId)?.id ??
+    environmentProjects[0]?.id ??
+    null;
   const conversationQuery = useEnvironmentQuery(
     environmentId === null ||
       serverConfigs.get(environmentId)?.environment.capabilities.externalConversationImport !== true
@@ -97,21 +108,6 @@ export function ExternalConversationImportRouteScreen() {
     );
   }, [conversationQuery.data?.conversations, searchQuery]);
 
-  useEffect(() => {
-    if (
-      environmentId === null ||
-      !environments.some((environment) => environment.environmentId === environmentId)
-    ) {
-      setEnvironmentId(environments[0]?.environmentId ?? null);
-    }
-  }, [environmentId, environments]);
-
-  useEffect(() => {
-    if (!environmentProjects.some((project) => project.id === projectId)) {
-      setProjectId(environmentProjects[0]?.id ?? null);
-    }
-  }, [environmentProjects, projectId]);
-
   const environmentActions = useMemo<MenuAction[]>(
     () =>
       environments.map((environment) => ({
@@ -133,16 +129,16 @@ export function ExternalConversationImportRouteScreen() {
   );
   const environmentLabel =
     environments.find((environment) => environment.environmentId === environmentId)?.label ??
-    "Environment";
+    gt("Environment");
   const projectLabel =
-    environmentProjects.find((project) => project.id === projectId)?.title ?? "Project";
+    environmentProjects.find((project) => project.id === projectId)?.title ?? gt("Project");
 
   const openThread = useCallback(
     (threadId: ThreadId) => {
       if (environmentId === null) return;
-      navigation.navigate("Thread", { environmentId, threadId });
+      selectDetail({ name: "Thread", params: { environmentId, threadId } });
     },
-    [environmentId, navigation],
+    [environmentId, selectDetail],
   );
 
   const handleConversationPress = useCallback(
@@ -226,10 +222,14 @@ export function ExternalConversationImportRouteScreen() {
                     tintColorClassName="accent-icon"
                     type="monochrome"
                   />
-                  <Text className="text-xs font-t3-medium text-foreground-muted">Imported</Text>
+                  <Text className="text-xs font-t3-medium text-foreground-muted">
+                    <T>Imported</T>
+                  </Text>
                 </View>
               ) : (
-                <Text className="text-xs font-t3-medium text-foreground">Import</Text>
+                <Text className="text-xs font-t3-medium text-foreground">
+                  <T>Import</T>
+                </Text>
               )}
             </View>
           </View>
@@ -242,8 +242,10 @@ export function ExternalConversationImportRouteScreen() {
   const listHeader = (
     <View className="gap-4 pb-4">
       <Text className="text-sm leading-relaxed text-foreground-muted">
-        Bring Claude Code and Codex conversations into T3 Code with their complete tool call
-        history.
+        <T>
+          Bring Claude Code and Codex conversations into T3 Code with their complete tool call
+          history.
+        </T>
       </Text>
       <View className="flex-row gap-2">
         <Menu
@@ -259,7 +261,7 @@ export function ExternalConversationImportRouteScreen() {
           }}
         >
           <ControlPill
-            accessibilityLabel="Choose import environment"
+            accessibilityLabel={gt("Choose import environment")}
             icon="server.rack"
             label={environmentLabel}
             variant="pill"
@@ -274,7 +276,7 @@ export function ExternalConversationImportRouteScreen() {
           }}
         >
           <ControlPill
-            accessibilityLabel="Choose target project"
+            accessibilityLabel={gt("Choose target project")}
             disabled={environmentProjects.length === 0}
             icon="folder"
             label={projectLabel}
@@ -290,12 +292,12 @@ export function ExternalConversationImportRouteScreen() {
           type="monochrome"
         />
         <TextInput
-          accessibilityLabel="Search external conversations"
+          accessibilityLabel={gt("Search external conversations")}
           autoCapitalize="none"
           autoCorrect={false}
           className="flex-1 py-2 text-base text-foreground"
           onChangeText={setSearchQuery}
-          placeholder="Search conversations"
+          placeholder={gt("Search conversations")}
           placeholderTextColorClassName="accent-placeholder"
           value={searchQuery}
         />
@@ -311,41 +313,40 @@ export function ExternalConversationImportRouteScreen() {
   const emptyState = conversationQuery.isPending ? (
     <View className="items-center gap-3 py-12">
       <ActivityIndicator />
-      <Text className="text-sm text-foreground-muted">Finding local conversations…</Text>
+      <Text className="text-sm text-foreground-muted">
+        <T>Finding local conversations…</T>
+      </Text>
     </View>
   ) : conversationQuery.error ? (
     <View className="items-center gap-3 py-12">
       <Text className="text-center text-sm text-danger">{conversationQuery.error}</Text>
-      <ControlPill label="Try again" onPress={conversationQuery.refresh} variant="pill" />
+      <ControlPill label={gt("Try again")} onPress={conversationQuery.refresh} variant="pill" />
     </View>
   ) : (
     <View className="items-center gap-2 px-6 py-12">
       <Text className="text-center text-lg font-t3-bold text-foreground">
         {environments.length === 0
-          ? "No compatible environment"
+          ? gt("No compatible environment")
           : searchQuery.trim()
-            ? "No matching conversations"
-            : "No conversations found"}
+            ? gt("No matching conversations")
+            : gt("No conversations found")}
       </Text>
       <Text className="text-center text-sm leading-relaxed text-foreground-muted">
         {environments.length === 0
-          ? "Connect to an updated T3 Code environment with a configured Claude Code or Codex provider."
+          ? gt(
+              "Connect to an updated T3 Code environment with a configured Claude Code or Codex provider.",
+            )
           : searchQuery.trim()
-            ? "Try a different search."
-            : "No Claude Code or Codex history was found on this environment."}
+            ? gt("Try a different search.")
+            : gt("No Claude Code or Codex history was found on this environment.")}
       </Text>
     </View>
   );
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
-        <>
-          <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Import Conversations" onBack={() => navigation.goBack()} />
-        </>
-      ) : null}
+    <SettingsScreen title={gt("Import Conversations")}>
       <LegendList
+        renderScrollComponent={NativeScrollView}
         className="flex-1"
         contentContainerStyle={{
           paddingBottom: Math.max(insets.bottom, 18) + 18,
@@ -363,6 +364,6 @@ export function ExternalConversationImportRouteScreen() {
         renderItem={renderConversation}
         showsVerticalScrollIndicator={false}
       />
-    </View>
+    </SettingsScreen>
   );
 }
