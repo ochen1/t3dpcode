@@ -134,7 +134,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         assert.deepStrictEqual(manifest.bin, { t3: "./bin/t3.mjs" });
         assert.isUndefined(manifest.dependencies);
         assert.isUndefined(manifest.optionalDependencies);
-        assert.equal(npmReleaseDatabaseMigration(manifest), 105);
+        assert.equal(npmReleaseDatabaseMigration(manifest), 109);
 
         const installed = path.join(root, "installed");
         yield* fs.makeDirectory(installed);
