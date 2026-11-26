@@ -1,4 +1,5 @@
 import type { ProviderInstanceEnvironment } from "@t3tools/contracts";
+import { stripAppImageRuntimeEnv } from "@t3tools/shared/appImageRuntimeEnv";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 
@@ -8,7 +9,8 @@ export const mergeProviderInstanceEnvironment = Effect.fn(function* (
   environment: ProviderInstanceEnvironment | undefined,
   baseEnv: NodeJS.ProcessEnv = process.env,
 ) {
-  const next: NodeJS.ProcessEnv = { ...baseEnv };
+  // Commands the agent runs inherit this env; the AppImage mount's libraries would shadow the system's.
+  const next: NodeJS.ProcessEnv = { ...stripAppImageRuntimeEnv(baseEnv) };
   delete next.XPC_FLAGS;
   delete next.XPC_SERVICE_NAME;
 

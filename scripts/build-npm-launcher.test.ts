@@ -118,6 +118,8 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
+        // macOS temp directories sit under /var, a link to /private/var, and the launcher
+        // reports the resolved path it runs from.
         const root = yield* fs.realPath(
           yield* fs.makeTempDirectoryScoped({ prefix: "t3-npm-launcher-test-" }),
         );
@@ -134,7 +136,7 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         assert.deepStrictEqual(manifest.bin, { t3: "./bin/t3.mjs" });
         assert.isUndefined(manifest.dependencies);
         assert.isUndefined(manifest.optionalDependencies);
-        assert.equal(npmReleaseDatabaseMigration(manifest), 109);
+        assert.equal(npmReleaseDatabaseMigration(manifest), 126);
 
         const installed = path.join(root, "installed");
         yield* fs.makeDirectory(installed);

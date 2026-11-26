@@ -656,7 +656,8 @@ describe("V2 thread find", () => {
       Effect.gen(function* () {
         const projection = yield* setup;
         const queuedRunId = RunId.make("queued:cancelled");
-        yield* commit([run(threadId, queuedRunId, 2, "cancelled")]);
+        const cancelled = run(threadId, queuedRunId, 2, "cancelled");
+        yield* commit([{ ...cancelled, payload: { ...cancelled.payload, startedAt: null } }]);
         const queued = item("cancelled", 1, "needle", "user_message");
         if (queued.type !== "user_message") return;
         const answer = item("async-answer:question", 2, "needle", "user_message");
@@ -969,10 +970,10 @@ describe("V2 history materialization", () => {
             startedAt: DateTime.formatIso(at(1)),
             completedAt: DateTime.formatIso(at(2)),
           })})`;
-      const interrupt = (
+      const interrupt = <Type extends "run_interrupt_request" | "run_interrupt_result">(
         id: string,
         ordinal: number,
-        type: "run_interrupt_request" | "run_interrupt_result",
+        type: Type,
       ) => ({
         ...item(id, ordinal, ""),
         type,

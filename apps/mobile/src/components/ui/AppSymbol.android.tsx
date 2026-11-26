@@ -1,4 +1,3 @@
-import type { Icon } from "@tabler/icons-react-native/types";
 /* Package-root imports eagerly register the entire Tabler icon set in Metro. */
 import IconAdjustmentsHorizontal from "@tabler/icons-react-native/IconAdjustmentsHorizontal";
 import IconAlarm from "@tabler/icons-react-native/IconAlarm";
@@ -144,6 +143,8 @@ import IconX from "@tabler/icons-react-native/IconX";
 import type { AndroidSymbol, SFSymbol, SymbolViewProps } from "expo-symbols";
 import { StyleSheet, View } from "react-native";
 import { withUniwind } from "uniwind";
+
+type Icon = typeof IconAlarm;
 
 const ANDROID_ICON_BY_SF_SYMBOL = {
   plusminus: IconPlusMinus,
